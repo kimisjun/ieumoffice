@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join, extname } from 'node:path'
-import type { IncomingMessage, ServerResponse } from 'node:http'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { resolveRendererFile } from '@genoffice/electron-utils'
 import {
   resolveDrawioRequest,
@@ -447,6 +447,40 @@ function serveDrawioArea(
   }
 }
 
+/**
+ * QA 2차 P0-C: the draw.io mirror runs on its own loopback port (app port+1),
+ * a tiny static server with NO app routes and NO token surface. The frame can
+ * navigate itself wherever it likes — every document at this port is static
+ * draw.io content, and the app's privileged origin lives on another port, so
+ * no navigation can make the frame same-origin with the parent page.
+ */
+export function startDrawioMirror(
+  appPort: number,
+  token: string,
+): { port: number; close: () => void } {
+  const mirrorPort = appPort + 1
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    const pathname = decodeURIComponent(url.pathname)
+    const reqHost = req.headers.host ?? `127.0.0.1:${mirrorPort}`
+    try {
+      if (serveDrawioArea(req, res, pathname, reqHost, { token })) return
+      res.writeHead(404, { 'Content-Type': 'text/plain' })
+      res.end('not found')
+    } catch (err) {
+      console.error('[web] drawio mirror request failed:', err)
+      if (!res.headersSent) {
+        res.writeHead(500)
+        res.end('internal error')
+      }
+    }
+  })
+  server.listen(mirrorPort, '127.0.0.1', () => {
+    console.log(`[web] draw.io mirror (static only, unauthenticated): http://localhost:${mirrorPort}/__drawio/`)
+  })
+  return { port: mirrorPort, close: () => server.close() }
+}
+
 /** one request: static bundles, media routes, launcher; returns false when the
  *  path belongs to something else (the WebSocket upgrade) */
 export async function serveWebStatic(
@@ -458,9 +492,15 @@ export async function serveWebStatic(
   const pathname = decodeURIComponent(url.pathname)
   const reqHost = req.headers.host ?? '127.0.0.1'
 
-  // unauthenticated static surface: draw.io mirror + frame bridge (see
-  // serveDrawioArea) — no user data, and the frame must not see the token
-  if (serveDrawioArea(req, res, pathname, reqHost, options)) return true
+  // QA 2차 P0-C: the draw.io mirror is NOT served on the app's own origin —
+  // serveDrawioArea only runs on the dedicated mirror port (startDrawioMirror).
+  // /__drawio/* and /__ieum/* here fall through to the token gate and the
+  // not-found path: no executable document exists at the privileged origin.
+  if (pathname.startsWith('/__drawio') || pathname.startsWith('/__ieum')) {
+    res.writeHead(404, { 'Content-Type': 'text/plain' })
+    res.end('the draw.io mirror lives on its own port')
+    return true
+  }
 
   if (!tokenValid(req, options.token, options.port)) {
     unauthorized(res)

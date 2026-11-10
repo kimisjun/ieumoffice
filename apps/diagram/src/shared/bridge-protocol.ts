@@ -44,14 +44,14 @@ export interface MessageLike {
  */
 export function webDrawioOrigin(): string {
   if (typeof location === 'undefined' || !location.protocol.startsWith('http')) return ''
-  const otherHost =
-    location.hostname === '127.0.0.1'
-      ? 'localhost'
-      : location.hostname === 'localhost'
-        ? '127.0.0.1'
-        : location.hostname
-  const port = location.port ? `:${location.port}` : ''
-  return `${location.protocol}//${otherHost}${port}`
+  // QA 2차 P0-C: the frame runs on the DEDICATED mirror port (app port + 1).
+  // A different port is a different origin no matter what the frame navigates
+  // itself to — the mirror serves static draw.io files only, so no executable
+  // same-origin document can ever share the privileged app's origin. The old
+  // same-port host flip collapsed as soon as the frame navigated to the app
+  // host's own mirror path (QA_REPORT_2ND P0-C repro).
+  const appPort = Number(location.port || (location.protocol === 'https:' ? 443 : 80))
+  return `http://localhost:${appPort + 1}`
 }
 
 /** Host side: only the draw.io frame's own window, from the draw.io origin. */

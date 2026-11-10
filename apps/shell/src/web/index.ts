@@ -9,6 +9,7 @@ import { installWebDialogPatch } from './web-dialogs'
 import {
   originHostOk,
   serveWebStatic,
+  startDrawioMirror,
   tokenValid,
   webRendererRoots,
   type RendererRoots,
@@ -179,10 +180,14 @@ export async function startWebServer(
   console.log(`[web] GenOffice web UI: ${where}?token=${token}`)
   console.log('[web] token auth is always on — share the printed URL, not the bare port')
 
+  // QA 2차 P0-C: draw.io mirror on its own loopback port (static only)
+  const drawioMirror = startDrawioMirror(config.port, token)
+
   return {
     server,
     config,
     close: () => {
+      drawioMirror.close()
       wss.close()
       server.close()
     },

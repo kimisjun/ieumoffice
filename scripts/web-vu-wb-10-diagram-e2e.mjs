@@ -142,6 +142,24 @@ try {
   await new Promise((r) => setTimeout(r, 1500))
   noteStep('C2 no external requests while draw.io runs', external.length === 0, { external: external.slice(0, 5) })
 
+  // C3 (QA 2차 P0-C): the frame must not be able to make itself same-origin
+  // with the privileged app. The QA repro navigated the frame to the app
+  // host's own mirror path and read the parent DOM from there — the mirror now
+  // lives on its own port and the app host refuses the path with a
+  // script-less page, so no untrusted code can ever execute at the app origin.
+  const appOrigin = new URL(page.url()).origin
+  const nav = await page.request.fetch(`${appOrigin}/__drawio/index.html`, { failOnStatusCode: false })
+  const navBody = await nav.text()
+  const mirrorPortProbe = await page.request.fetch(`http://localhost:${new URL(iso.frameSrc).port}/__drawio/index.html`, { failOnStatusCode: false })
+  noteStep('C3 self-navigation escape closed (app host has no executable mirror)', (
+    nav.status() === 404 && !/<script/i.test(navBody) && mirrorPortProbe.status() === 200
+  ), {
+    appHostMirrorStatus: nav.status(),
+    appHostMirrorHasScript: /<script/i.test(navBody),
+    appHostMirrorBody: navBody.slice(0, 80),
+    mirrorPortStatus: mirrorPortProbe.status(),
+  })
+
   // S2: the fixture's own content, parsed by the engine (artifact-level open
   // evidence; the visual render is recorded as a screenshot)
   await page.screenshot({ path: join(shotDir, 's2-open.png') })

@@ -16,22 +16,34 @@ export const SCHEME_REWRITES: Record<string, [string, string][]> = {
   ],
 }
 
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
 /**
- * Rewrites are scoped to the URL form only (`scheme://…` ↔ `/__x://…`).
- * Bare scheme names inside document text, code samples or user input pass
- * through untouched — a body like "Literal /__mdasset and md-asset." must
- * round-trip byte-identically (QA P0-A). The lookbehind keeps an already
- * rewritten literal (`/__mdasset://…` contains `md-asset://`) from being
- * rewritten twice.
+ * QA 2차 P0-A: rewriting is scoped to URL FIELDS, never free text.
+ *
+ * 1. whole-value strings that ARE a URL (imageSources entries, media URLs,
+ *    file/asset paths — how URL fields travel the bridge); and
+ * 2. HTML URL attribute values inside markup bodies (src/href/… — the URL
+ *    fields of HTML content).
+ *
+ * Document text, code samples and prose that merely CONTAINS a URL-looking
+ * literal pass through byte-identically in both directions — the QA repro
+ * "Literal /__mdasset://example/doc and md-asset://example/doc." must
+ * round-trip unchanged (QA_REPORT_2ND P0-A).
  */
+const URL_ATTR_RE =
+  /(\s(?:src|href|poster|action|formaction|data-src|data-href|xlink:href)\s*=\s*["'])([^"']*)(["'])/gi
+
 function rewriteSchemeLiterals(value: unknown, from: string, to: string): unknown {
-  const bare = new RegExp(`(?<![\\w-])${escapeRe(from)}://`, 'g')
+  const head = `${from}://`
+  const fixValue = (s: string): string =>
+    s.startsWith(head) && !/\s/.test(s) ? `${to}://${s.slice(head.length)}` : s
+  const fixString = (s: string): string => {
+    if (!s.includes('://')) return s
+    if (s.startsWith(head) && !/\s/.test(s)) return fixValue(s)
+    return s.replace(URL_ATTR_RE, (_m, pre: string, val: string, post: string) =>
+      `${pre}${fixValue(val)}${post}`)
+  }
   const walk = (v: unknown): unknown => {
-    if (typeof v === 'string') return v.replace(bare, `${to}://`)
+    if (typeof v === 'string') return fixString(v)
     if (Array.isArray(v)) return v.map(walk)
     if (v !== null && typeof v === 'object') {
       // only plain objects rebuild; typed arrays (decoded binaries) and other

@@ -77,4 +77,39 @@ describe('web bridge scheme rewriting', () => {
     const desk = { src: 'md-asset://h/p' }
     expect(rewriteIn('markdown', desk)).toEqual(desk) // already scheme form
   })
+
+  // QA 2차 P0-A: URL-FORM literals inside document prose must round-trip
+  // byte-identically — this is the exact reproduce.mjs repro from the report
+  it('QA repro: URL-form body literals round-trip byte-identically', () => {
+    const body = 'Literal /__mdasset://example/doc and md-asset://example/doc.'
+    expect(rewriteOut('markdown', body)).toBe(body)
+    expect(rewriteIn('markdown', body)).toBe(body)
+    expect(rewriteIn('markdown', rewriteOut('markdown', { text: body }))).toEqual({ text: body })
+    const htmlBody = 'See /__preview://example/doc and html-asset://example/doc.'
+    expect(rewriteIn('html', rewriteOut('html', { body: htmlBody }))).toEqual({ body: htmlBody })
+    const docsBody = 'See /__media://example/doc and genoffice-docx-media://example/doc.'
+    expect(rewriteIn('docs', rewriteOut('docs', { text: docsBody }))).toEqual({ text: docsBody })
+  })
+
+  it('QA repro: markdown save body with URL-form text and imageSources is lossless', () => {
+    const req = {
+      text: 'Literal /__mdasset://example/doc and md-asset://example/doc.\n\n![](md-asset://img/1.png)',
+      imageSources: ['/__mdasset://img/1.png'], // browser form: the renderer fetches these
+      mode: 'save',
+    }
+    const toServer = rewriteIn('markdown', req)
+    // the body travels untouched; only the URL FIELD is mapped
+    expect(toServer.text).toBe(req.text)
+    expect(toServer.imageSources).toEqual(['md-asset://img/1.png']) // server form
+    expect(rewriteOut('markdown', toServer)).toEqual(req)
+  })
+
+  it('rewrites HTML URL attribute values but never text nodes', () => {
+    const html = '<p>keep md-asset://x as prose</p><img src="html-asset://y/a.png"><a href="html-preview://v/">t</a>'
+    const out = rewriteOut('html', html) as string
+    expect(out).toBe(
+      '<p>keep md-asset://x as prose</p><img src="/__htmlasset://y/a.png"><a href="/__preview://v/">t</a>',
+    )
+    expect(rewriteIn('html', out)).toBe(html)
+  })
 })
