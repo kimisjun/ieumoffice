@@ -117,6 +117,14 @@ export function injectIntoHtml(html: string, injection: string, reqHost: string)
   html = html.replace(/connect-src ([^"]*?)(?=")/, (m, list: string) =>
     list.includes(wsSource) ? m : `connect-src ${list} ${wsSource}`,
   )
+  // the html app's preview pane iframes /__preview://… — same-origin after the
+  // scheme rewrite, but the desktop CSP's frame-src never lists the HTTP
+  // serving origin, so the browser blocks the frame (frame-src violation).
+  // Frame the page's own origin like the WebSocket above.
+  const httpSource = `http://${reqHost}`
+  html = html.replace(/frame-src ([^"]*?)(?=")/, (m, list: string) =>
+    list.includes("'self'") ? m : `frame-src ${list} 'self' ${httpSource}`,
+  )
   const moduleScript = /<script[^>]*type="module"[^>]*>/
   const match = moduleScript.exec(html)
   if (match) return html.slice(0, match.index) + injection + html.slice(match.index)
