@@ -35,6 +35,12 @@ import type {
   WebContents,
 } from 'electron'
 import { atomicWriteFile } from './atomic-write'
+// first statement of the module body: the capture wrapper must be installed
+// before any ipcMain registration below (and in the app modules) so the web
+// bridge can reach every handler
+import { installWebIpcCapture } from '../web/capture'
+installWebIpcCapture()
+import { parseWebServerArgv, startWebServer } from '../web/index'
 import { tabStripOverlay } from './title-bar-overlay'
 import { shellWindowBackground } from './window-background'
 import { installPointerSize } from './pointer-size'
@@ -689,6 +695,9 @@ if (headlessArgv.kind !== 'none') {
   setHeadlessMode(true)
   app.dock?.hide()
 }
+
+/** --web-server (or GENOFFICE_WEB=1): also serve the suite to browsers */
+const webServerArgv = parseWebServerArgv(process.argv)
 
 /**
  * `--reveal-ai-secrets`: the terminal command's way to open the keys this app
@@ -9576,6 +9585,14 @@ app.whenReady().then(async () => {
   if (headlessArgv.kind !== 'none') {
     await runHeadlessExportEntry(headlessArgv)
     return
+  }
+  if (webServerArgv.enabled) {
+    // the web front end shares this process: same handlers, same sidecar, same
+    // file access. Started before the window so a --hidden web service boots
+    // without flashing a desktop window.
+    void startWebServer(webServerArgv.overrides).catch((err: unknown) => {
+      console.error('[web] server failed to start:', err)
+    })
   }
   const lockData = () =>
     pendingLaunchPaths.length > 0
