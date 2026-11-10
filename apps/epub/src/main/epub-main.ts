@@ -222,6 +222,21 @@ export function epubIsTranslationLocked(webContentsId: number): boolean {
 }
 
 /** The file was renamed on disk: re-grant the new path and tell the renderer */
+/** Web mode (shell `--web-server`): one browser tab acting as an epub view.
+ * Mirrors the desktop tab creation's seeding — register the IPC surface and
+ * queue this webContents' pending open path (consumePending hands it to the
+ * renderer; a missing path means a new untitled book). */
+export function trackWebEpubTab(webContents: WebContents, openPath?: string | null): void {
+  registerEpubIpc()
+  const wcId = webContents.id
+  if (openPath) {
+    openPathByWc.set(wcId, openPath)
+    const allowed = allowedByWc.get(wcId) ?? new Set<string>()
+    allowed.add(openPath)
+    allowedByWc.set(wcId, allowed)
+  }
+}
+
 export function epubFileRenamed(contents: WebContents, oldPath: string, newPath: string): void {
   const wcId = contents.id
   if (savePathByWc.get(wcId) === oldPath) savePathByWc.set(wcId, newPath)
