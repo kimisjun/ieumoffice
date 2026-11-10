@@ -3,6 +3,15 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join, extname } from 'node:path'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { resolveRendererFile } from '@genoffice/electron-utils'
+import {
+  resolveDrawioRequest,
+  injectBridge,
+  drawioCsp,
+  contentTypeOf,
+  responseHeaders,
+  PRINT_PAGE_CSP,
+} from '../../../diagram/src/main/drawio-protocol'
+import { takePrintDocument } from '../../../diagram/src/main/print-document'
 import { readLazyMedia } from '../../../docs/src/main/lazy-media'
 import { takeHandoff } from '../../../docs/src/main/byte-handoff'
 import { serveMarkdownAsset } from '../../../markdown/src/main/markdown-main'
@@ -392,7 +401,62 @@ export async function serveWebStatic(
     return true
   }
 
-  const mount = /^\/([a-z]+)(\/.*)?$/.exec(pathname)
+  // draw.io's offline bundle for the diagram app over HTTP — a mirror of
+  // drawio-protocol.ts (same refusal rules via resolveDrawioRequest, same
+  // index.html bridge-script injection, same CSP). Only in web mode: desktop
+  // keeps the drawio-app:// scheme. The bridge script keeps its own path
+  // because the frame bridge is built to load it from /__ieum/bridge.js.
+  if (pathname === '/__ieum/bridge.js') {
+    const bridgeFile = join(app.getAppPath(), '..', 'diagram', 'out', 'bridge', 'bridge.js')
+    if (existsSync(bridgeFile)) {
+      res.writeHead(200, responseHeaders('text/javascript; charset=utf-8', drawioCsp([])))
+      res.end(readFileSync(bridgeFile))
+    } else {
+      res.writeHead(404, { 'Content-Type': 'text/plain' })
+      res.end('diagram bridge is not built')
+    }
+    return true
+  }
+  const drawioMount = /^\/__drawio\/(.*)$/.exec(pathname)
+  if (drawioMount) {
+    const drawioDir = join(app.getAppPath(), '..', 'diagram', 'out', 'drawio')
+    const origin = `http://${req.headers.host ?? reqHost}`
+    const target = resolveDrawioRequest(drawioDir, `drawio-app://editor/${drawioMount[1] || 'index.html'}`)
+    const csp = drawioCsp([origin], "'self'")
+    switch (target.kind) {
+      case 'refused':
+        res.writeHead(target.status, { 'Content-Type': 'text/plain' })
+        res.end('refused')
+        return true
+      case 'bridge':
+        res.writeHead(200, responseHeaders('text/javascript; charset=utf-8', csp))
+        res.end(readFileSync(join(app.getAppPath(), '..', 'diagram', 'out', 'bridge', 'bridge.js')))
+        return true
+      case 'print': {
+        const html = takePrintDocument(target.token)
+        if (html === null) {
+          res.writeHead(404, { 'Content-Type': 'text/plain' })
+          res.end('no print document')
+        } else {
+          res.writeHead(200, responseHeaders('text/html; charset=utf-8', PRINT_PAGE_CSP))
+          res.end(html)
+        }
+        return true
+      }
+      case 'file': {
+        if (target.relative !== 'index.html') {
+          res.writeHead(200, responseHeaders(contentTypeOf(target.path), csp))
+          res.end(readFileSync(target.path))
+          return true
+        }
+        res.writeHead(200, responseHeaders('text/html; charset=utf-8', csp))
+        res.end(injectBridge(readFileSync(target.path, 'utf8')))
+        return true
+      }
+    }
+  }
+
+const mount = /^\/([a-z]+)(\/.*)?$/.exec(pathname)
   if (mount) {
     const appName = mount[1]
     // a known app whose renderer is missing still answers with the build hint

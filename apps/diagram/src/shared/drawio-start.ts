@@ -33,7 +33,13 @@ export function drawioStartUrl(options: { lang: Lang; dark: boolean }): string {
     ['spin', '1'],
   ]
   if (options.dark) params.push(['dark', '1'])
-  return `${DRAWIO_ORIGIN}/index.html?${params.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')}`
+  // web mode (real browser): the custom scheme does not exist there; the web
+  // server mirrors the drawio-protocol contract at /__drawio/ on this origin
+  const origin =
+    typeof location !== 'undefined' && location.protocol.startsWith('http')
+      ? `${location.origin}/__drawio`
+      : DRAWIO_ORIGIN
+  return `${origin}/index.html?${params.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')}`
 }
 
 /**

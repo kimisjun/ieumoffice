@@ -51,8 +51,14 @@ export const DRAWIO_SCHEME_PRIVILEGE: CustomScheme = {
  *   no policy violation without it.
  * - `frame-ancestors`: only the app's editor page may hold draw.io.
  */
-export function drawioCsp(frameAncestors: readonly string[]): string {
-  const self = `${DRAWIO_SCHEME}:`
+export function drawioCsp(
+  frameAncestors: readonly string[],
+  // web mode serves the bundle from the page origin, so draw.io's own files
+  // are 'self' there; desktop keeps the dedicated scheme origin. The policy
+  // stays "draw.io fetches its own files only" either way.
+  selfSource: string = `${DRAWIO_SCHEME}:`,
+): string {
+  const self = selfSource
   return [
     "default-src 'none'",
     `script-src ${self}`,

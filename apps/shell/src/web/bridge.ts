@@ -10,6 +10,7 @@ import { trackWebTab as trackHtmlTab } from '../../../html/src/main/html-main'
 import { trackWebHwpTab } from '../../../hwp/src/main/hwp-main'
 import { trackWebMindmapTab } from '../../../mindmap/src/main/mindmap-main'
 import { trackWebEpubTab } from '../../../epub/src/main/epub-main'
+import { trackWebDiagramTab } from '../../../diagram/src/main/diagram-main'
 import { decodeFrame, encodeFrame } from './serialize'
 import { rewriteIn, rewriteOut } from './schemes'
 import { WebTabContents, registerWebTab, unregisterWebTab } from './web-contents'
@@ -118,6 +119,8 @@ function seedTabFromUrl(tab: WebTabContents): void {
     trackWebMindmapTab(tab.asWebContents(), path)
   } else if (app === 'epub') {
     trackWebEpubTab(tab.asWebContents(), path)
+  } else if (app === 'diagram') {
+    trackWebDiagramTab(tab.asWebContents(), path)
   }
 }
 

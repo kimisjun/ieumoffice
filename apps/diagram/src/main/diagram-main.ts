@@ -298,6 +298,22 @@ function copyAgain(contents: WebContents): () => void {
   }
 }
 
+/** Web mode (shell `--web-server`): one browser tab acting as a diagram view.
+ * Mirrors the desktop tab creation's seeding — register the IPC surface and
+ * queue this webContents' pending open path (consumePending hands it to the
+ * renderer). The draw.io bundle itself is served over HTTP by the web server
+ * (static.ts /__drawio/), mirroring drawio-protocol.ts. */
+export function trackWebDiagramTab(webContents: WebContents, openPath?: string | null): void {
+  registerDiagramIpc()
+  const wcId = webContents.id
+  if (openPath) {
+    openPathByWc.set(wcId, openPath)
+    const allowed = allowedByWc.get(wcId) ?? new Set<string>()
+    allowed.add(openPath)
+    allowedByWc.set(wcId, allowed)
+  }
+}
+
 export function diagramIsDirty(webContentsId: number): boolean {
   return dirtyByWc.has(webContentsId)
 }

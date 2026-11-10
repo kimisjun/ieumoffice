@@ -37,7 +37,13 @@ export interface MessageLike {
 
 /** Host side: only the draw.io frame's own window, from the draw.io origin. */
 export function isFromDrawioFrame(event: MessageLike, frameWindow: unknown): boolean {
-  return frameWindow != null && event.source === frameWindow && event.origin === DRAWIO_ORIGIN
+  const webOrigin =
+    typeof location !== 'undefined' && location.protocol.startsWith('http') ? location.origin : ''
+  return (
+    frameWindow != null &&
+    event.source === frameWindow &&
+    (event.origin === DRAWIO_ORIGIN || (webOrigin !== '' && event.origin === webOrigin))
+  )
 }
 
 /** Bridge side: only the parent window, from the parent's origin. */

@@ -124,7 +124,14 @@ export class DrawioFrame {
 
   #post(message: unknown): void {
     if (!this.#window) throw new Error('the editor is not there')
-    this.#window.postMessage(message, DRAWIO_ORIGIN)
+    // targetOrigin is the DESTINATION frame's origin: the custom scheme in
+    // desktop, this page's own origin when the bundle is served over HTTP
+    this.#window.postMessage(
+      message,
+      typeof location !== 'undefined' && location.protocol.startsWith('http')
+        ? location.origin
+        : DRAWIO_ORIGIN,
+    )
   }
 
   /** draw.io's embed actions (`load`, `export`, …), as the JSON string it reads. */
