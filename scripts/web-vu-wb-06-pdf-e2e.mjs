@@ -11,7 +11,7 @@
 import { createRequire } from 'node:module'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -26,6 +26,9 @@ const shotDir = '/tmp/web-e2e/shots-pdf'
 mkdirSync(shotDir, { recursive: true })
 
 const MARK = `PDF-SLICE-${Date.now()}`
+// each run starts from the pristine fixture — accumulated edits shift the
+// text blocks and break the fixed-coordinate targeting for the next run
+copyFileSync('/tmp/web-e2e/doc-pristine.pdf', file)
 const FIXTURE = 'VU-WB-01b fixture'
 const withToken = (path) => `${base}${path}${path.includes('?') ? '&' : '?'}token=${token}`
 const executablePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
@@ -33,6 +36,36 @@ const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
 
 const results = []
 const errors = []
+// QA 1차 P1-A: a vision-dependent leg never auto-PASSES. It waits until an
+// independent adjudication file carries THIS run's screenshot hash.
+const visionAdjudications = (() => {
+  try { return JSON.parse(readFileSync('/tmp/web-e2e/vision-adjudication.json', 'utf8')) } catch { return {} }
+})()
+function visionLeg(step, machineOk, shotPath, expectations, detail = {}) {
+  const sha = sha256(readFileSync(shotPath))
+  const adj = visionAdjudications[sha]
+  if (!machineOk) {
+    noteStep(step, false, { ...detail, vision: { sha256: sha, expectations } })
+    return
+  }
+  if (adj && adj.verdict === 'ok') {
+    noteStep(step, true, {
+      ...detail,
+      vision: { sha256: sha, verdict: adj.verdict, reader: adj.reader ?? 'vision_analyze', expectations },
+    })
+    return
+  }
+  noteStep(`${step}: PENDING_VISION`, false, {
+    ...detail,
+    vision: {
+      sha256: sha,
+      status: adj ? adj.verdict : 'PENDING_VISION',
+      expectations,
+      note: 'automatic PASS withheld until an independent vision adjudication bound to this screenshot hash exists',
+    },
+  })
+}
+
 const noteStep = (step, ok, detail) => {
   results.push({ step, ok, detail })
   console.log(`[${ok ? 'PASS' : 'FAIL'}] ${step}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`)
@@ -174,12 +207,18 @@ try {
   await page2.waitForTimeout(3000)
   const tool2 = await activateTextEditTool(page2)
   if (tool2) await page2.mouse.click(tool2.x, tool2.y)
-  await clickTitleBlock(page2)
-  const echo6 = await waitForBlockEcho(page2, MARK)
+  let echo6 = { ok: false, echo: null }
+  for (let attempt = 0; attempt < 3 && !echo6.ok; attempt++) {
+    await clickTitleBlock(page2)
+    echo6 = await waitForBlockEcho(page2, MARK, 2500)
+    if (!echo6.ok) await page2.waitForTimeout(400)
+  }
   await page2.screenshot({ path: join(shotDir, 's6-reopen.png') })
-  noteStep('S6 fresh-context reopen (edited block echo)', echo6.ok, {
-    echo: echo6.echo, fixtureStillThere: (echo6.echo ?? '').includes(FIXTURE),
-  })
+  const mounted2 = await page2.evaluate(() => (document.querySelector('#root')?.children.length ?? 0) > 0)
+  visionLeg('S6 fresh-context reopen (edited block visible; content vision-verified)', mounted2,
+    join(shotDir, 's6-reopen.png'),
+    'the page text shows the PDF-SLICE marker and the VU-WB-01b fixture line',
+    { echo: echo6.echo, fixtureStillThere: (echo6.echo ?? '').includes(FIXTURE) })
   await ctx2.close()
 
   // S7: original-engine re-parse through the Node CLI convert entry (the

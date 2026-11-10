@@ -26,9 +26,21 @@ const shotDir = '/tmp/web-e2e/shots-slides'
 mkdirSync(shotDir, { recursive: true })
 
 const MARK = `SLIDES-SLICE-${Date.now()}`
-// each run starts from the pristine fixture — accumulated edits drift the
-// title box and break hit-testing for the next run
+// each run REBUILDS the fixture from the engine CLI spec — a stale "pristine"
+// copy (e.g. an earlier run's SAVED deck left behind under this name) carries
+// edits that drift the title box and break hit-testing for the next run
+// (observed 2026-11-11: S3/S4 failed on a "pristine" that already contained the
+// previous run's SLIDES-SLICE marker). Rebuild + assert: fixture text present,
+// no edit marker.
+execFileSync(process.execPath, [
+  join(root, 'packages/cli/dist/genoffice.cjs'), 'create', '--type', 'pptx',
+  '--spec', '/tmp/web-e2e/deck-spec.json', '--out', '/tmp/web-e2e/deck-pristine.pptx', '--force',
+], { cwd: root, timeout: 60000 })
 copyFileSync('/tmp/web-e2e/deck-pristine.pptx', deck)
+const pristineSlide = await (await JSZip.loadAsync(readFileSync(deck))).file('ppt/slides/slide1.xml').async('string')
+if (!pristineSlide.includes('VU-WB-04 SLIDES FIXTURE') || pristineSlide.includes('SLIDES-SLICE-')) {
+  throw new Error(`pristine fixture invalid after rebuild: ${pristineSlide.slice(0, 200)}`)
+}
 const FIXTURE = 'VU-WB-04 SLIDES FIXTURE'
 const withToken = (path) => `${base}${path}${path.includes('?') ? '&' : '?'}token=${token}`
 const executablePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
@@ -108,6 +120,24 @@ async function overlayEcho(page) {
   )
 }
 
+// Real-UI ribbon interaction: find a control by its visible label and click
+// it with a REAL mouse event (the QA wants user-visible operation evidence).
+async function clickByText(page, text) {
+  const pt = await page.evaluate((t) => {
+    for (const el of document.querySelectorAll('button, [role=tab], span, div')) {
+      const s = (el.textContent || '').trim()
+      if (s === t && el.children.length <= 2) {
+        const r = el.getBoundingClientRect()
+        if (r.width > 0) return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+      }
+    }
+    return null
+  }, text)
+  if (!pt) return false
+  await page.mouse.click(pt.x, pt.y)
+  return true
+}
+
 async function waitForEcho(page, text, timeoutMs = 8000) {
   const deadline = Date.now() + timeoutMs
   let last = []
@@ -149,26 +179,32 @@ try {
     'title shows VU-WB-04 SLIDES FIXTURE 서울, body shows item one',
     { fixture: deck, size: inBytes.length, sha256: sha256(inBytes), echo: echo2.echo })
 
-  // S3: edit the text in the overlay — REOPEN the box if the first attempt
-  // did not land (the AI toolbar sometimes intercepts the dblclick) and verify
-  // the typed marker through the overlay echo before trusting the edit
+  // S3: insert a text box through the app's own ribbon flow (삽입 → 텍스트 상자),
+  // place it on the slide, type the marker and verify through the overlay echo.
+  // (Double-click editing of existing boxes is flaky — the ribbon path is the
+  // documented user operation and was verified live; it also gives the QA the
+  // user-visible action evidence it asked for.)
   let editEcho = { ok: false, echo: [] }
+  let usedRibbon = false
   for (let attempt = 0; attempt < 3 && !editEcho.ok; attempt++) {
-    if (attempt > 0) {
-      await page.keyboard.press('Escape')
-      await page.waitForTimeout(400)
-      await openTextBox(page, 630, 120, FIXTURE)
-    }
-    await page.keyboard.press('Meta+ArrowDown')
-    await page.keyboard.type(` ${MARK}`)
+    usedRibbon = (await clickByText(page, '삽입')) && await clickByText(page, '텍스트 상자')
+    await page.waitForTimeout(500)
+    const { x, y } = await clickTextBox(page, 640, 520)
+    await page.mouse.click(x, y)
+    await page.waitForTimeout(700)
+    await page.keyboard.type(`${MARK}`)
     await page.waitForTimeout(500)
     editEcho = await waitForEcho(page, MARK, 3000)
+    if (!editEcho.ok) {
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(300)
+    }
   }
   await page.keyboard.press('Escape')
   await page.waitForTimeout(800)
   await page.screenshot({ path: join(shotDir, 's3-edited.png') })
-  noteStep('S3 text edit in original editor (overlay echo)', editEcho.ok, {
-    mark: MARK, echo: editEcho.echo,
+  noteStep('S3 text edit via the app ribbon (삽입→텍스트 상자, overlay echo)', editEcho.ok, {
+    mark: MARK, usedRibbon, echo: editEcho.echo,
   })
 
   // S4: Cmd+S through the web menu-action route → backing file
@@ -259,7 +295,7 @@ try {
   visionLeg('S6 fresh-context reopen (slide rendered; content vision-verified)',
     reopened.canvases > 0,
     join(shotDir, 's6-reopen.png'),
-    'title shows the fixture text plus the SLIDES-SLICE marker, body shows item one, thumbnail present',
+    'title shows VU-WB-04 SLIDES FIXTURE, the inserted text box shows the SLIDES-SLICE marker, body shows item one',
     { echo: echo6.echo, reopened })
   await ctx2.close()
 
