@@ -8,6 +8,7 @@ import { trackWebTab as trackMarkdownTab } from '../../../markdown/src/main/mark
 import { trackWebTab as trackPdfTab } from '../../../pdf/src/main/pdf-main'
 import { trackWebTab as trackHtmlTab } from '../../../html/src/main/html-main'
 import { trackWebHwpTab } from '../../../hwp/src/main/hwp-main'
+import { trackWebMindmapTab } from '../../../mindmap/src/main/mindmap-main'
 import { decodeFrame, encodeFrame } from './serialize'
 import { rewriteIn, rewriteOut } from './schemes'
 import { WebTabContents, registerWebTab, unregisterWebTab } from './web-contents'
@@ -112,6 +113,8 @@ function seedTabFromUrl(tab: WebTabContents): void {
     trackHtmlTab(tab.asWebContents(), path)
   } else if (app === 'hwp') {
     trackWebHwpTab(tab.asWebContents(), path)
+  } else if (app === 'mindmap') {
+    trackWebMindmapTab(tab.asWebContents(), path)
   }
 }
 

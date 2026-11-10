@@ -242,6 +242,21 @@ export function mindmapFilePath(webContentsId: number): string | undefined {
 }
 
 /** The file was renamed on disk: re-grant the new path and tell the renderer */
+/** Web mode (shell `--web-server`): one browser tab acting as a mindmap view.
+ * Mirrors the desktop tab creation's seeding — register the IPC surface and
+ * queue this webContents' pending open path (consumePending hands it to the
+ * renderer; a missing path means a new untitled map). */
+export function trackWebMindmapTab(webContents: WebContents, openPath?: string | null): void {
+  registerMindmapIpc()
+  const wcId = webContents.id
+  if (openPath) {
+    openPathByWc.set(wcId, openPath)
+    const allowed = allowedByWc.get(wcId) ?? new Set<string>()
+    allowed.add(openPath)
+    allowedByWc.set(wcId, allowed)
+  }
+}
+
 export function mindmapFileRenamed(contents: WebContents, oldPath: string, newPath: string): void {
   const wcId = contents.id
   if (savePathByWc.get(wcId) === oldPath) savePathByWc.set(wcId, newPath)

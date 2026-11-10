@@ -274,10 +274,17 @@ function showDialogOverlay(req: DialogRequest): void {
 
   function respond(path: string | null): void {
     host.remove()
-    dialogResolver?.(
-      path === null ? { canceled: true } : { canceled: false, filePath: path, filePaths: [path] },
-    )
     dialogResolver = null
+    // answer the server's pending dialog (bridge.ts 'dialog-response' →
+    // resolveWebDialog). The old code resolved `dialogResolver`, which the
+    // tail of this overlay had set to `() => respond(null)` — mutual
+    // recursion (RangeError) and no result ever reached the save flow.
+    call({
+      t: 'dialog-response',
+      id: req.id,
+      result:
+        path === null ? { canceled: true } : { canceled: false, filePath: path, filePaths: [path] },
+    })
   }
 
   async function confirmSelection(): Promise<void> {
@@ -327,17 +334,15 @@ function showMessageOverlay(req: DialogRequest): void {
     }
     btn.onclick = () => {
       host.remove()
-      const resolve = dialogResolver
       dialogResolver = null
-      resolve?.({ canceled: false, response: index })
+      call({ t: 'dialog-response', id: req.id, result: { canceled: false, response: index } })
     }
     row.appendChild(btn)
   })
   dialogResolver = () => {
-    const resolve = dialogResolver
     dialogResolver = null
     host.remove()
-    resolve?.({ canceled: false, response: 0 })
+    call({ t: 'dialog-response', id: req.id, result: { canceled: false, response: 0 } })
   }
 }
 
