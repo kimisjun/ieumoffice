@@ -61,6 +61,21 @@ function send(channel: string, args: unknown[]): void {
   call({ t: 'send', channel, args })
 }
 
+/** Web tabs have no native menu bar, so the File-menu accelerators the desktop
+ *  app owns (CmdOrCtrl+S / Shift+CmdOrCtrl+S — see the shell menu templates)
+ *  are forwarded as a menu-action frame; the bridge delivers the same
+ *  menu:action IPC the menu click sends, to this tab's renderer. */
+window.addEventListener(
+  'keydown',
+  (ev: KeyboardEvent) => {
+    if (!(ev.metaKey || ev.ctrlKey) || ev.altKey) return
+    if (ev.key.toLowerCase() !== 's') return
+    ev.preventDefault()
+    call({ t: 'menu-action', action: ev.shiftKey ? 'save-as' : 'save' })
+  },
+  true,
+)
+
 function failAllPending(err: Error): void {
   for (const p of pendingInvokes.values()) p.reject(err)
   pendingInvokes.clear()

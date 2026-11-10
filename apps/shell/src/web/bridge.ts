@@ -2,6 +2,7 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import type { IncomingMessage } from 'node:http'
 import { markDocsNewBlank, queueDocsPendingOpen } from '../../../docs/src/main/docs-main'
 import { createSheetsWebTab, setSheetsNewBlank } from '../../../sheets/src/main/sheets-main'
+import { IPC_CHANNELS } from '../../../sheets/src/shared/ipc-channels'
 import { trackWebSlidesTab } from '../../../slides/src/main/slides-main'
 import { trackWebTab as trackMarkdownTab } from '../../../markdown/src/main/markdown-main'
 import { trackWebTab as trackPdfTab } from '../../../pdf/src/main/pdf-main'
@@ -55,6 +56,22 @@ const invokeOverrides: Record<string, InvokeOverride> = {
   },
   'win:list': () => [],
   'win:focus': () => undefined,
+}
+
+/** actions the desktop File menu dispatches (see the shell menu templates and
+ *  each app preload's onMenuAction whitelist) */
+const MENU_ACTIONS = new Set([
+  'open', 'save', 'save-as', 'print', 'export-pdf', 'export-csv', 'undo', 'redo',
+])
+
+/** Web tabs have no native menu: the client forwards the File-menu accelerators
+ *  and the same menu:action IPC the menu click sends reaches THIS tab's
+ *  renderer (the desktop sendSheetsMenuAction targets the active desktop view
+ *  instead). Apps whose renderers bind their own save keys (docs, markdown)
+ *  never send the frame. */
+function dispatchMenuAction(tab: WebTabContents, action: string): void {
+  if (!MENU_ACTIONS.has(action)) return
+  if (appOfTab(tab) === 'sheets') tab.send(IPC_CHANNELS.menuAction, action)
 }
 
 function appOfTab(tab: WebTabContents): string {
@@ -187,6 +204,8 @@ export function attachWebBridge(
         )
       } else if (t === 'send' && typeof frame.channel === 'string') {
         dispatchSend({ tab, ws }, frame.channel, Array.isArray(frame.args) ? frame.args : [])
+      } else if (t === 'menu-action' && typeof frame.action === 'string') {
+        dispatchMenuAction(tab, frame.action)
       } else if (t === 'dialog-response' && Number.isFinite(Number(frame.id))) {
         resolveWebDialog(Number(frame.id), frame.result as never, tab)
       } else if (t === 'dialog-list' && Number.isFinite(Number(frame.id))) {
