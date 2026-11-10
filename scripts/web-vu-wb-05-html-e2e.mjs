@@ -3,7 +3,13 @@
 //   S1 mount → S2 open page.html → S3 edit → S4 save (renderer-bound Cmd+S) →
 //   S5 download via /api/convert (html→docx engine, OOXML verified) →
 //   S6 fresh-context reopen → S7 original-engine re-parse (headless-export docx)
-// Also asserts the preview-iframe CSP frame-src fix: no CSP frame errors.
+//   S8 preview-iframe CSP frame-src: no CSP frame errors
+//   S9 QA P0-B: extension-less asset Accept forwarding (real <img> load +
+//      Accept image/* → image/jpeg byte-identical, Accept */* → 404)
+// Also asserts QA P0-A: scheme-literal body text ("Literal /__preview and
+// html-preview." / "Literal /__htmlasset and html-asset.") round-trips
+// byte-identically through open → edit → save.
+// Each run starts from a pristine fixture (accumulated edits drift the file).
 // Run: WEB_TOKEN=... node scripts/web-vu-wb-05-html-e2e.mjs [baseURL]
 import { createRequire } from 'node:module'
 import { execFileSync } from 'node:child_process'
@@ -15,19 +21,44 @@ import { fileURLToPath } from 'node:url'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(join(root, 'package.json'))
 const { chromium } = require('playwright-core')
-const JSZip = require('jszip')
 
 const base = process.argv[2] ?? 'http://127.0.0.1:8931'
 const token = process.env.WEB_TOKEN ?? ''
 const file = '/tmp/web-e2e/page.html'
+const assetFile = '/tmp/web-e2e/photo-noext' // extension-less JPEG (QA P0-B)
 const shotDir = '/tmp/web-e2e/shots-html'
 mkdirSync(shotDir, { recursive: true })
 
 const MARK = `HTML-SLICE-${Date.now()}`
 const FIXTURE = 'VU-WB-05 HTML FIXTURE 서울'
+// QA 1차 반려 P0-A 재현 문자열 — 스킴 쌍의 두 형태를 한 문장에 담아
+// 어느 방향의 재작성이든 본문 변형을 드러낸다 (02 재실행과 동일 규격)
+const LITERALS = [
+  'Literal /__preview and html-preview.',
+  'Literal /__htmlasset and html-asset.',
+]
 const withToken = (path) => `${base}${path}${path.includes('?') ? '&' : '?'}token=${token}`
 const executablePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex')
+
+// pristine fixture reset per run
+const fixtureHtml = [
+  '<!DOCTYPE html>',
+  '<html lang="ko"><head><meta charset="utf-8"><title>VU-WB-05</title></head>',
+  `<body><h1>${FIXTURE}</h1><p>item one</p>`,
+  `<p>${LITERALS[0]}</p>`,
+  `<p>${LITERALS[1]}</p>`,
+  '<img src="photo-noext" alt="VU-WB-05-ASSET">',
+  '</body></html>',
+].join('\n')
+writeFileSync(file, fixtureHtml)
+// 1x1 baseline JPEG (verified decodable: sips 1x1) with NO extension — the
+// "Save page as, complete" shape QA P0-B is about
+const JPEG_1X1 = Buffer.from(
+  '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==',
+  'base64',
+)
+writeFileSync(assetFile, JPEG_1X1)
 
 const results = []
 const errors = []
@@ -55,6 +86,19 @@ async function waitForEcho(page, text, timeoutMs = 30000) {
     await page.waitForTimeout(400)
   }
   return { ok: false, echo: last.map((v) => v.slice(0, 120)) }
+}
+/** full (untruncated) editor text — literal checks must not run on log slices */
+async function fullEcho(page) {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('[contenteditable="true"]')]
+      .filter((e) => e.getClientRects().length > 0)
+      .map((e) => e.innerText),
+  )
+}
+/** P0-A: every QA literal must appear verbatim in the full body text */
+function literalsIntact(fullTexts) {
+  const joined = fullTexts.join('\n')
+  return LITERALS.map((lit) => ({ literal: lit, present: joined.includes(lit) }))
 }
 
 // the '소스' toolbar tab reveals the CodeMirror source editor — the app's
@@ -86,8 +130,9 @@ try {
   const echo2 = await waitForEcho(page, FIXTURE)
   await page.screenshot({ path: join(shotDir, 's2-open.png') })
   const inBytes = readFileSync(file)
-  noteStep('S2 html open (fixture rendered)', echo2.ok, {
-    fixture: file, size: inBytes.length, sha256: sha256(inBytes), echo: echo2.echo,
+  const lit2 = literalsIntact(await fullEcho(page))
+  noteStep('S2 html open (fixture rendered, P0-A literals verbatim)', echo2.ok && lit2.every((l) => l.present), {
+    fixture: file, size: inBytes.length, sha256: sha256(inBytes), echo: echo2.echo, literals: lit2,
   })
 
   // S3: edit — click the source line holding 'item one', End, add a paragraph
@@ -117,9 +162,21 @@ try {
       if (text.includes(MARK)) saved = { bytes, text }
     } catch { /* still saving */ }
   }
-  noteStep('S4 save to backing file (Cmd+S)', !!saved, saved ? {
+  // P0-A body-fidelity on the saved bytes: literals verbatim, no scheme-rewrite
+  // mutation traces (the 1st-round failure mode rewrote /__x ↔ scheme pairs)
+  const mutationForms = [
+    'html-preview and html-preview', '/__preview and /__preview',
+    'html-asset and html-asset', '/__htmlasset and /__htmlasset',
+    '/__mdasset', 'md-asset://', '/__media',
+  ]
+  const lit4 = saved
+    ? LITERALS.map((lit) => ({ literal: lit, present: saved.text.includes(lit) }))
+    : []
+  const mutated = saved ? mutationForms.filter((m) => saved.text.includes(m)) : mutationForms
+  noteStep('S4 save to backing file (Cmd+S, P0-A body lossless)', !!saved && lit4.every((l) => l.present) && mutated.length === 0, saved ? {
     size: saved.bytes.length, sha256: sha256(saved.bytes),
     hasMark: true, hasFixture: saved.text.includes('VU-WB-05 HTML FIXTURE'),
+    literals: lit4, mutationTraces: mutated,
   } : 'marker not on disk within 20s')
 
   // S5: download via /api/convert html→docx (html2docx engine)
@@ -162,8 +219,11 @@ try {
   await openSourceMode(page2)
   const echo6 = await waitForEcho(page2, MARK)
   await page2.screenshot({ path: join(shotDir, 's6-reopen.png') })
-  noteStep('S6 fresh-context reopen (edited content)', echo6.ok, {
-    echo: echo6.echo, fixtureStillThere: echo6.echo.some((v) => String(v).includes('VU-WB-05 HTML FIXTURE')),
+  const full6 = await fullEcho(page2)
+  const lit6 = literalsIntact(full6)
+  noteStep('S6 fresh-context reopen (edited content, literals verbatim)', echo6.ok && lit6.every((l) => l.present), {
+    echo: echo6.echo, fixtureStillThere: full6.join('\n').includes('VU-WB-05 HTML FIXTURE'),
+    literals: lit6,
   })
   await ctx2.close()
 
@@ -195,18 +255,63 @@ try {
     cspErrors, totalCollected: errors.length,
   })
 
+  // S9: QA P0-B — the extension-less asset path forwards the browser's real
+  // Accept header (web route mirrors the desktop protocol handler)
+  const assetUrl = withToken('/__htmlasset://local/tmp/web-e2e/photo-noext')
+  const expectSha = sha256(JPEG_1X1)
+  const imgLeg = await page.evaluate((url) => new Promise((done) => {
+    const img = new Image()
+    const timer = setTimeout(() => done({ ok: false, why: 'timeout' }), 15000)
+    img.onload = () => { clearTimeout(timer); done({ ok: true, naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight }) }
+    img.onerror = () => { clearTimeout(timer); done({ ok: false, why: 'img error' }) }
+    img.src = url
+  }), assetUrl)
+  const fetchImage = await page.evaluate(async (url) => {
+    const res = await fetch(url, { headers: { Accept: 'image/*' } })
+    const buf = new Uint8Array(await res.arrayBuffer())
+    let out = ''
+    for (let i = 0; i < buf.length; i += 32768) out += String.fromCharCode(...buf.subarray(i, i + 32768))
+    return { status: res.status, contentType: res.headers.get('content-type'), len: buf.length, b64: btoa(out) }
+  }, assetUrl).catch((e) => ({ error: String(e).slice(0, 200) }))
+  const fetchOpaque = await page.evaluate(async (url) => {
+    const res = await fetch(url, { headers: { Accept: '*/*' } })
+    return { status: res.status, contentType: res.headers.get('content-type') }
+  }, assetUrl).catch((e) => ({ error: String(e).slice(0, 200) }))
+  const fetchedSha = fetchImage.b64 ? sha256(Buffer.from(fetchImage.b64, 'base64')) : null
+  noteStep('S9 extension-less asset Accept forwarding (QA P0-B)',
+    imgLeg.ok === true && fetchImage.status === 200 && (fetchImage.contentType ?? '').startsWith('image/jpeg')
+      && fetchedSha === expectSha && fetchOpaque.status === 404,
+    {
+      img: imgLeg,
+      fetchImageAccept: {
+        status: fetchImage.status, contentType: fetchImage.contentType, len: fetchImage.len,
+        sha256: fetchedSha, expected: expectSha, byteIdentical: fetchedSha === expectSha,
+      },
+      fetchStarAccept: fetchOpaque,
+    })
+
   await ctx1.close()
 } finally {
   await browser.close()
 }
 
+const counts = {
+  pass: results.filter((r) => r.ok).length,
+  fail: results.filter((r) => !r.ok).length,
+  total: results.length,
+}
+const requiredPassed = results.every((r) => r.ok) // every leg is required here
 const summary = {
-  slice: 'VU-WB-05 HTML vertical slice (web bridge, ieumoffice v0.12.11 @ b8cb8564b)',
+  slice: 'VU-WB-05 HTML vertical slice (web bridge, ieumoffice v0.12.11 @ b8cb8564b) — QA 1차 재실행',
   mark: MARK,
+  fixture: { file, literals: LITERALS, assetFile, assetSha256: sha256(JPEG_1X1) },
   results,
+  counts,
+  verdict: requiredPassed ? 'PASS' : 'FAIL',
+  requiredPassed,
+  allPassed: requiredPassed,
   consoleOrPageErrors: errors.slice(0, 20),
-  allPassed: results.every((r) => r.ok),
 }
 writeFileSync('/tmp/web-e2e/vu-wb-05-html-e2e.json', JSON.stringify(summary, null, 2))
-console.log('SUMMARY', JSON.stringify({ allPassed: summary.allPassed, errors: summary.consoleOrPageErrors.length }))
-process.exit(summary.allPassed ? 0 : 1)
+console.log('SUMMARY', JSON.stringify({ verdict: summary.verdict, counts, errors: summary.consoleOrPageErrors.length }))
+process.exit(requiredPassed ? 0 : 1)
