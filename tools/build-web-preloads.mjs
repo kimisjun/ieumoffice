@@ -37,7 +37,7 @@ await esbuild.build({
   outfile: join(outDir, 'client.js'),
 })
 
-const apps = ['docs', 'sheets', 'slides', 'pdf', 'markdown', 'html']
+const apps = ['docs', 'sheets', 'slides', 'pdf', 'markdown', 'html', 'hwp', 'mindmap', 'epub', 'diagram']
 for (const app of apps) {
   await esbuild.build({
     ...common,

@@ -979,6 +979,15 @@ export async function editorTakes(
   }
 }
 
+/** Web mode (shell `--web-server`): one browser tab acting as an HWP view.
+ * Mirrors html-main's trackWebTab — register the IPC surface and seed this
+ * webContents' view state (pending open path + granted path) through the
+ * same grantAndTrack the desktop windows use. */
+export function trackWebHwpTab(webContents: WebContents, openPath?: string | null): void {
+  registerHwpIpc()
+  grantAndTrack(webContents, openPath)
+}
+
 function grantAndTrack(
   wc: WebContents,
   openPath?: string | null,

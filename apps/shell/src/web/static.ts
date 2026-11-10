@@ -28,7 +28,7 @@ import { SCHEME_REWRITES } from './schemes'
 export type RendererRoots = Record<string, string>
 
 export function webRendererRoots(): RendererRoots {
-  const names = ['docs', 'sheets', 'slides', 'pdf', 'markdown', 'html']
+  const names = ['docs', 'sheets', 'slides', 'pdf', 'markdown', 'html', 'hwp', 'mindmap', 'epub', 'diagram']
   const roots: RendererRoots = {}
   for (const name of names) {
     roots[name] = app.isPackaged
