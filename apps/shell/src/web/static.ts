@@ -319,6 +319,10 @@ function launcherHtml(): string {
     ['pdf', 'PDF'],
     ['markdown', 'Markdown'],
     ['html', 'HTML'],
+    ['hwp', 'HWP'],
+    ['mindmap', 'Mindmap'],
+    ['epub', 'EPUB'],
+    ['diagram', 'Diagram'],
   ]
   const links = apps
     .map(([id, label]) => `<a class="card" href="/${id}/"><b>${label}</b><span>/${id}/</span></a>`)
