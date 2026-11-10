@@ -71,7 +71,9 @@ const MENU_ACTIONS = new Set([
  *  never send the frame. */
 function dispatchMenuAction(tab: WebTabContents, action: string): void {
   if (!MENU_ACTIONS.has(action)) return
-  if (appOfTab(tab) === 'sheets') tab.send(IPC_CHANNELS.menuAction, action)
+  const app = appOfTab(tab)
+  if (app === 'sheets') tab.send(IPC_CHANNELS.menuAction, action)
+  else if (app === 'slides') tab.send('slides:menu', action)
 }
 
 function appOfTab(tab: WebTabContents): string {
