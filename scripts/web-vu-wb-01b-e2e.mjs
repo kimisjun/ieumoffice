@@ -127,9 +127,15 @@ try {
   const dlDisp = dlRes.headers.get('content-disposition') ?? ''
   const dlText = await dlRes.text()
   writeFileSync('/tmp/web-e2e/report-download.md', dlText)
-  note('S5 download via /api/convert (browser-side fetch)', dlRes.status === 200 && dlDisp.includes('attachment') && dlText.includes(MARK), {
-    status: dlRes.status, disposition: dlDisp, hasMark: dlText.includes(MARK), hasFixture: dlText.includes('VU-WB-01b fixture'), bytes: dlText.length,
+  // QA 1차 P1-G: the browser leg is judged by the BROWSER's own fetch (in-page);
+  // the Node fetch below is a recorded cross-check only
+  note('S5 download via /api/convert (browser-side fetch)',
+    dl.status === 200 && (dl.disposition ?? '').includes('attachment') && dl.hasMark === true, {
     inPageFetch: dl,
+    nodeCrossCheck: {
+      status: dlRes.status, disposition: dlDisp, hasMark: dlText.includes(MARK),
+      hasFixture: dlText.includes('VU-WB-01b fixture'), bytes: dlText.length,
+    },
   })
 
   // ---- S6: fresh browser context reopen ----

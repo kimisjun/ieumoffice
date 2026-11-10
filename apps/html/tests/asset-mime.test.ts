@@ -94,3 +94,30 @@ describe('editableImageMime', () => {
     expect(editableImageMime(bytes('<svg xmlns="http://www.w3.org/2000/svg">'))).toBeNull()
   })
 })
+
+describe('extensionlessAssetMime', () => {
+  const jpegHead = bytes([0xff, 0xd8, 0xff, 0xe0])
+  const cssText = bytes('body { color: red }')
+
+  // QA 1차 P0-B: the Accept header picks the slot; callers must forward the
+  // real header (desktop protocol handler + web /__htmlasset route).
+  it('serves an extensionless JPEG to an image slot', () => {
+    expect(extensionlessAssetMime('tTsEQygh', jpegHead, 'image/*')).toBe('image/jpeg')
+    expect(extensionlessAssetMime('tTsEQygh', jpegHead, 'image/avif,image/webp,*/*')).toBe(
+      'image/jpeg',
+    )
+  })
+
+  it('rejects an extensionless image for a generic slot (why Accept must be forwarded)', () => {
+    expect(extensionlessAssetMime('tTsEQygh', jpegHead, '*/*')).toBeNull()
+    expect(extensionlessAssetMime('tTsEQygh', jpegHead, null)).toBeNull()
+  })
+
+  it('types extensionless CSS by its slot and would mislabel it without Accept', () => {
+    expect(extensionlessAssetMime('tTsEQygh', cssText, 'text/css')).toBe('text/css; charset=utf-8')
+    // a lost Accept header lands in the 'other' slot — the P0-B regression case
+    expect(extensionlessAssetMime('tTsEQygh', cssText, '*/*')).toBe(
+      'text/javascript; charset=utf-8',
+    )
+  })
+})

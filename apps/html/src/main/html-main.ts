@@ -1540,7 +1540,11 @@ async function resolveSaveTarget(
  * "Save page as, complete" assets by signature / requesting slot.
  */
 function registerImageProtocol(): void {
-  protocol.handle('html-asset', (request) => serveHtmlAsset(request.url))
+  // Accept decides the slot for extensionless "Save page as, complete"
+  // assets (image/* vs anything else) — forward the real header (QA P0-B).
+  protocol.handle('html-asset', (request) =>
+    serveHtmlAsset(request.url, request.headers.get('accept') ?? '*/*'),
+  )
 }
 
 /** the html-asset handler body, shared by the Electron protocol route and the

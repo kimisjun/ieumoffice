@@ -16,22 +16,38 @@ export const SCHEME_REWRITES: Record<string, [string, string][]> = {
   ],
 }
 
-function walk(value: unknown, visit: (s: string) => string): unknown {
-  if (typeof value === 'string') return visit(value)
-  if (Array.isArray(value)) return value.map((v) => walk(v, visit))
-  if (value !== null && typeof value === 'object') {
-    // only plain objects rebuild; typed arrays (decoded binaries) and other
-    // classed instances pass through untouched — index-key reconstruction
-    // would turn a Uint8Array into {0:1, 1:2, …}
-    const proto = Object.getPrototypeOf(value)
-    if (proto !== Object.prototype && proto !== null) return value
-    const out: Record<string, unknown> = {}
-    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-      out[key] = walk(entry, visit)
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Rewrites are scoped to the URL form only (`scheme://…` ↔ `/__x://…`).
+ * Bare scheme names inside document text, code samples or user input pass
+ * through untouched — a body like "Literal /__mdasset and md-asset." must
+ * round-trip byte-identically (QA P0-A). The lookbehind keeps an already
+ * rewritten literal (`/__mdasset://…` contains `md-asset://`) from being
+ * rewritten twice.
+ */
+function rewriteSchemeLiterals(value: unknown, from: string, to: string): unknown {
+  const bare = new RegExp(`(?<![\\w-])${escapeRe(from)}://`, 'g')
+  const walk = (v: unknown): unknown => {
+    if (typeof v === 'string') return v.replace(bare, `${to}://`)
+    if (Array.isArray(v)) return v.map(walk)
+    if (v !== null && typeof v === 'object') {
+      // only plain objects rebuild; typed arrays (decoded binaries) and other
+      // classed instances pass through untouched — index-key reconstruction
+      // would turn a Uint8Array into {0:1, 1:2, …}
+      const proto = Object.getPrototypeOf(v)
+      if (proto !== Object.prototype && proto !== null) return v
+      const out: Record<string, unknown> = {}
+      for (const [key, entry] of Object.entries(v as Record<string, unknown>)) {
+        out[key] = walk(entry)
+      }
+      return out
     }
-    return out
+    return v
   }
-  return value
+  return walk(value)
 }
 
 /** server → browser: scheme literals become the same-origin paths the served
@@ -39,10 +55,9 @@ function walk(value: unknown, visit: (s: string) => string): unknown {
 export function rewriteOut(app: string, value: unknown): unknown {
   const rules = SCHEME_REWRITES[app]
   if (!rules) return value
-  return walk(value, (s) => {
-    for (const [scheme, prefix] of rules) s = s.split(scheme).join(prefix)
-    return s
-  })
+  let out = value
+  for (const [scheme, prefix] of rules) out = rewriteSchemeLiterals(out, scheme, prefix)
+  return out
 }
 
 /** browser → server: same-origin paths become the scheme literals the
@@ -50,8 +65,7 @@ export function rewriteOut(app: string, value: unknown): unknown {
 export function rewriteIn(app: string, value: unknown): unknown {
   const rules = SCHEME_REWRITES[app]
   if (!rules) return value
-  return walk(value, (s) => {
-    for (const [scheme, prefix] of rules) s = s.split(prefix).join(scheme)
-    return s
-  })
+  let out = value
+  for (const [scheme, prefix] of rules) out = rewriteSchemeLiterals(out, prefix, scheme)
+  return out
 }

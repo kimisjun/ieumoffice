@@ -38,6 +38,36 @@ const noteStep = (step, ok, detail) => {
   console.log(`[${ok ? 'PASS' : 'FAIL'}] ${step}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`)
 }
 
+// QA 1차 P1-A: a vision-dependent leg never auto-PASSES. It waits until an
+// independent adjudication file carries THIS run's screenshot hash.
+const visionAdjudications = (() => {
+  try { return JSON.parse(readFileSync('/tmp/web-e2e/vision-adjudication.json', 'utf8')) } catch { return {} }
+})()
+function visionLeg(step, machineOk, shotPath, expectations, detail = {}) {
+  const sha = sha256(readFileSync(shotPath))
+  const adj = visionAdjudications[sha]
+  if (!machineOk) {
+    noteStep(step, false, { ...detail, vision: { sha256: sha, expectations } })
+    return
+  }
+  if (adj && adj.verdict === 'ok') {
+    noteStep(step, true, {
+      ...detail,
+      vision: { sha256: sha, verdict: adj.verdict, reader: adj.reader ?? 'vision_analyze', expectations },
+    })
+    return
+  }
+  noteStep(`${step}: PENDING_VISION`, false, {
+    ...detail,
+    vision: {
+      sha256: sha,
+      status: adj ? adj.verdict : 'PENDING_VISION',
+      expectations,
+      note: 'automatic PASS withheld until an independent vision adjudication bound to this screenshot hash exists',
+    },
+  })
+}
+
 // The Konva stage carries CANVAS_BLEED=160 slide-px of transparent margin on
 // each side (SlideCanvas.tsx), so stage = (1280+320)x(720+320) slide-px scaled
 // into the canvas element. Double-click enters text editing (onNodeDblClick).
@@ -110,9 +140,11 @@ try {
   const echo2 = await openTextBox(page, 630, 120, FIXTURE)
   await page.screenshot({ path: join(shotDir, 's2-open.png') })
   const inBytes = readFileSync(deck)
-  noteStep('S2 pptx open (title text box echo)', echo2.ok, {
-    fixture: deck, size: inBytes.length, sha256: sha256(inBytes), echo: echo2.echo,
-  })
+  visionLeg('S2 pptx open (slide rendered; content vision-verified)',
+    await page.evaluate(() => document.querySelectorAll('canvas').length > 0),
+    join(shotDir, 's2-open.png'),
+    'title shows VU-WB-04 SLIDES FIXTURE 서울, body shows item one',
+    { fixture: deck, size: inBytes.length, sha256: sha256(inBytes), echo: echo2.echo })
 
   // S3: edit the text in the overlay
   await page.keyboard.press('Meta+ArrowDown')
@@ -147,12 +179,20 @@ try {
     for (const name of Object.keys(savedZip.z.files)) {
       if (!before.file(name) && !savedZip.z.files[name].dir) changed.push(`+${name}`)
     }
-    noteStep('S4 save to backing file (Cmd+S)', true, {
-      size: savedZip.bytes.length, sha256: sha256(savedZip.bytes),
-      hasMark: true,
-      fixtureTextKept: savedZip.slide.includes('VU-WB-04 SLIDES FIXTURE'),
-      changedParts: changed,
-    })
+    // QA 1차 P1-G: preservation and the changed-part allowlist are ASSERTS
+    const fixtureTextKept = savedZip.slide.includes('VU-WB-04 SLIDES FIXTURE')
+    const allowedChanged = (name) =>
+      name === 'ppt/slides/slide1.xml' || name === 'ppt/slides/_rels/slide1.xml.rels' ||
+      name.startsWith('docProps/')
+    const unexpected = changed.filter((n) => !allowedChanged(n))
+    noteStep('S4 save to backing file (Cmd+S)',
+      fixtureTextKept && unexpected.length === 0, {
+        size: savedZip.bytes.length, sha256: sha256(savedZip.bytes),
+        hasMark: true,
+        fixtureTextKept,
+        changedParts: changed,
+        unexpectedChangedParts: unexpected,
+      })
   } else {
     noteStep('S4 save to backing file (Cmd+S)', false, 'marker not in ppt/slides/slide1.xml within 20s')
   }
@@ -200,10 +240,11 @@ try {
     canvases: document.querySelectorAll('canvas').length,
     rootChildren: document.querySelector('#root')?.children.length ?? 0,
   }))
-  noteStep('S6 fresh-context reopen (slide rendered; content vision-verified)', reopened.canvases > 0 && echo6.ok === false ? reopened.canvases > 0 : echo6.ok, {
-    echo: echo6.echo, reopened,
-    visionEvidence: 'shots-slides/s6-reopen.png (title: fixture + SLIDES-SLICE marker rendered, body item one, thumbnail)',
-  })
+  visionLeg('S6 fresh-context reopen (slide rendered; content vision-verified)',
+    reopened.canvases > 0,
+    join(shotDir, 's6-reopen.png'),
+    'title shows the fixture text plus the SLIDES-SLICE marker, body shows item one, thumbnail present',
+    { echo: echo6.echo, reopened })
   await ctx2.close()
 
   // S7: original-engine re-parse via the app binary

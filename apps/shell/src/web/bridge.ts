@@ -23,6 +23,7 @@ import {
   webDialogStartDirs,
 } from './web-dialogs'
 import { getInvokeHandler, getSendListeners } from './capture'
+import { channelAllowedForApp } from './ipc-scope'
 
 /**
  * The browser-side IPC transport. One WebSocket per browser tab; the tab is a
@@ -138,6 +139,11 @@ async function dispatchInvoke(
   const startedAt = Date.now()
   const args = rewriteIn(appOfTab(ctx.tab), rawArgs) as unknown[]
   try {
+    // per-app IPC scope (QA 1차 P0-C): deny by default — a document frame
+    // must not reach channels its editor's preload never exposed
+    if (!channelAllowedForApp(appOfTab(ctx.tab), channel)) {
+      throw new Error(`IPC channel out of scope for "${appOfTab(ctx.tab)}": ${channel}`)
+    }
     // AsyncLocalStorage scopes the dialog patch to this dispatch's own await
     // chain: a concurrent desktop IPC dispatch keeps its native dialogs
     value = await runWithWebDispatch(ctx.tab, async () => {
@@ -160,6 +166,10 @@ async function dispatchInvoke(
 }
 
 function dispatchSend(ctx: DispatchContext, channel: string, rawArgs: unknown[]): void {
+  if (!channelAllowedForApp(appOfTab(ctx.tab), channel)) {
+    console.error(`[web] send channel out of scope for "${appOfTab(ctx.tab)}": ${channel}`)
+    return
+  }
   const listeners = getSendListeners(channel)
   const args = rewriteIn(appOfTab(ctx.tab), rawArgs) as unknown[]
   runWithWebDispatch(ctx.tab, () => {

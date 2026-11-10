@@ -35,10 +35,28 @@ export interface MessageLike {
   data: unknown
 }
 
+/**
+ * Web mode: the draw.io frame rides the OTHER loopback host so it is
+ *  cross-origin from the app page — browser-enforced isolation (QA 1차 P0-C),
+ *  localhost ↔ 127.0.0.1 are always distinct origins. Any other hostname
+ *  falls back to same-origin; loopback experiments only (remote/multi-user
+ *  stays on HOLD). '' in desktop, where the custom scheme is the origin.
+ */
+export function webDrawioOrigin(): string {
+  if (typeof location === 'undefined' || !location.protocol.startsWith('http')) return ''
+  const otherHost =
+    location.hostname === '127.0.0.1'
+      ? 'localhost'
+      : location.hostname === 'localhost'
+        ? '127.0.0.1'
+        : location.hostname
+  const port = location.port ? `:${location.port}` : ''
+  return `${location.protocol}//${otherHost}${port}`
+}
+
 /** Host side: only the draw.io frame's own window, from the draw.io origin. */
 export function isFromDrawioFrame(event: MessageLike, frameWindow: unknown): boolean {
-  const webOrigin =
-    typeof location !== 'undefined' && location.protocol.startsWith('http') ? location.origin : ''
+  const webOrigin = webDrawioOrigin()
   return (
     frameWindow != null &&
     event.source === frameWindow &&

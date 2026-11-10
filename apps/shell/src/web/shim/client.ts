@@ -227,7 +227,7 @@ function showDialogOverlay(req: DialogRequest): void {
       <input data-role="name" style="flex:1;padding:7px 10px;border:1px solid var(--border,#d1d9e0);border-radius:var(--radius-4,8px);font-size:13px" />
     </div>
     <div style="padding:12px 16px;border-top:1px solid var(--border,#e4e7ec);display:flex;justify-content:flex-end;gap:8px">
-      <button data-role="cancel" style="padding:7px 14px;border:1px solid var(--border,#d1d9e0);background:var(--surface,#fff);border-radius:var(--radius-4,8px);cursor:pointer;font-size:13px">Cancel</button>
+      <button data-role="cancel" style="padding:7px 14px;border:1px solid var(--border,#d1d9e0);background:var(--surface,#fff);border-radius:var(--radius-4,8px);cursor:pointer;font-size:13px">취소</button>
       <button data-role="ok" style="padding:7px 14px;border:1px solid var(--accent,#0969da);background:var(--accent,#0969da);color:var(--docs-on-accent,#fff);border-radius:var(--radius-4,8px);cursor:pointer;font-size:13px"></button>
     </div>`
   host.appendChild(panel)
@@ -238,8 +238,8 @@ function showDialogOverlay(req: DialogRequest): void {
   let entries: DirEntry[] = []
   const nameInput = q('name') as HTMLInputElement
 
-  q('title').textContent = req.options.title ?? (kind === 'save' ? 'Save' : 'Open')
-  q('ok').textContent = req.options.buttonLabel ?? (kind === 'save' ? 'Save' : 'Open')
+  q('title').textContent = req.options.title ?? (kind === 'save' ? '저장' : '열기')
+  q('ok').textContent = req.options.buttonLabel ?? (kind === 'save' ? '저장' : '열기')
   if (kind === 'open') q('namer').style.display = 'none'
   else if (req.options.defaultPath) nameInput.value = req.options.defaultPath.split('/').pop() ?? ''
 
@@ -358,8 +358,8 @@ function showLostOverlay(): void {
   host.style.background = 'rgba(15,18,22,.85)'
   host.innerHTML =
     '<div style="background:var(--surface,#fff);border-radius:var(--radius-8,12px);padding:24px 28px;font:14px -apple-system,system-ui,sans-serif;max-width:420px;color:var(--text,#242424)">' +
-    '<b>GenOffice service disconnected.</b><br><br>' +
-    'The local service stopped or restarted. Reload this tab once it is reachable again.</div>'
+    '<b>이음오피스 서비스 연결이 끊겼습니다.</b><br><br>' +
+    '로컬 서비스가 중지되었거나 다시 시작되었습니다. 연결되면 이 탭을 새로 고쳐 주세요.</div>'
 }
 
 // ---- OS-file drops: a browser tab cannot read dropped local paths, and the

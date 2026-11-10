@@ -15,6 +15,7 @@ import {
   type BridgeOp,
   type BridgeOps,
   type EmbedEvent,
+  webDrawioOrigin,
 } from '../../shared/bridge-protocol'
 import type { DrawioFileExport } from '../../shared/formats'
 
@@ -125,11 +126,13 @@ export class DrawioFrame {
   #post(message: unknown): void {
     if (!this.#window) throw new Error('the editor is not there')
     // targetOrigin is the DESTINATION frame's origin: the custom scheme in
-    // desktop, this page's own origin when the bundle is served over HTTP
+    // desktop, the frame's own (other-loopback-host) origin over HTTP —
+    // `location.origin` would be dropped silently and the editor would spin
+    // on its boot screen forever (QA 1차 P0-C follow-up)
     this.#window.postMessage(
       message,
       typeof location !== 'undefined' && location.protocol.startsWith('http')
-        ? location.origin
+        ? webDrawioOrigin()
         : DRAWIO_ORIGIN,
     )
   }

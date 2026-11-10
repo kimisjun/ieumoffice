@@ -2,12 +2,12 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <!-- frame-src: drawio-app: is the desktop editor origin; 'self' covers the
-         web bridge, where the draw.io bundle is mirrored at /__drawio/ on this
-         origin (web/static.ts). -->
+    <!-- frame-src: drawio-app: is the desktop editor origin; the web bridge
+         mirrors the editor at /__drawio/ on the OTHER loopback host (browser-
+         enforced cross-origin isolation), so both loopback hosts are listed. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://localhost:*; frame-src drawio-app: 'self'; object-src 'none'; base-uri 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://localhost:*; frame-src drawio-app: 'self' http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'none'"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>IeumOffice Diagram</title>

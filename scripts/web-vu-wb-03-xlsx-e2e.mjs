@@ -37,6 +37,36 @@ const noteStep = (step, ok, detail) => {
   console.log(`[${ok ? 'PASS' : 'FAIL'}] ${step}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`)
 }
 
+// QA 1차 P1-A: a vision-dependent leg never auto-PASSES. It waits until an
+// independent adjudication file carries THIS run's screenshot hash.
+const visionAdjudications = (() => {
+  try { return JSON.parse(readFileSync('/tmp/web-e2e/vision-adjudication.json', 'utf8')) } catch { return {} }
+})()
+function visionLeg(step, machineOk, shotPath, expectations, detail = {}) {
+  const sha = sha256(readFileSync(shotPath))
+  const adj = visionAdjudications[sha]
+  if (!machineOk) {
+    noteStep(step, false, { ...detail, vision: { sha256: sha, expectations } })
+    return
+  }
+  if (adj && adj.verdict === 'ok') {
+    noteStep(step, true, {
+      ...detail,
+      vision: { sha256: sha, verdict: adj.verdict, reader: adj.reader ?? 'vision_analyze', expectations },
+    })
+    return
+  }
+  noteStep(`${step}: PENDING_VISION`, false, {
+    ...detail,
+    vision: {
+      sha256: sha,
+      status: adj ? adj.verdict : 'PENDING_VISION',
+      expectations,
+      note: 'automatic PASS withheld until an independent vision adjudication bound to this screenshot hash exists',
+    },
+  })
+}
+
 // click the largest canvas at a grid offset; return after settle
 async function canvasClick(page, dx, dy) {
   const box = await page.evaluate(() => {
@@ -104,10 +134,12 @@ try {
   const a1Shown = echoA1.ok
   await page.screenshot({ path: join(shotDir, 's2-open.png') })
   const inBytes = readFileSync(book)
-  noteStep('S2 xlsx open (A1 targeted; content vision-verified + S5 engine CSV)', a1Shown, {
-    fixture: book, size: inBytes.length, sha256: sha256(inBytes), echo: echoA1, canvasCount: box.count,
-    visionEvidence: 'shots-xlsx/s2-open.png (grid hello/42/43/3.14/TRUE/주일학교, formula bar hello)',
-  })
+  visionLeg('S2 xlsx open (A1 targeted; content vision-verified + S5 engine CSV)', a1Shown,
+    join(shotDir, 's2-open.png'),
+    'grid shows hello/42/43/3.14/TRUE/주일학교 and the formula bar shows hello',
+    {
+      fixture: book, size: inBytes.length, sha256: sha256(inBytes), echo: echoA1, canvasCount: box.count,
+    })
 
   // S3: click an empty region (right/below fixture cells) and type two values
   await canvasClick(page, Math.min(46 + 5 * 88 + 44, box.w - 40), Math.min(20 + 8 * 24 + 12, box.h - 40))
@@ -147,12 +179,22 @@ try {
       if (!before.file(name) && !savedZip.z.files[name].dir) changed.push(`+${name}`)
     }
     const all = savedZip.sheet + savedZip.sst
-    noteStep('S4 save to backing file (Cmd+S)', true, {
-      size: savedZip.bytes.length, sha256: sha256(savedZip.bytes),
-      hasMark: true,
-      fixtureValuesKept: all.includes('42') && all.includes('3.14') && all.includes('B1+1') && all.includes('주일학교'),
-      changedParts: changed,
-    })
+    const fixtureValuesKept = all.includes('42') && all.includes('3.14') && all.includes('B1+1') && all.includes('주일학교')
+    // QA 1차 P1-G: preservation and the changed-part allowlist are ASSERTS,
+    // not records — anything outside the workbook's data parts fails the leg
+    const allowedChanged = (name) =>
+      name === 'xl/worksheets/sheet1.xml' || name === 'xl/sharedStrings.xml' ||
+      name === 'xl/calcChain.xml' || name.startsWith('+xl/calcChain') ||
+      name.startsWith('docProps/')
+    const unexpected = changed.filter((n) => !allowedChanged(n))
+    noteStep('S4 save to backing file (Cmd+S)',
+      fixtureValuesKept && unexpected.length === 0, {
+        size: savedZip.bytes.length, sha256: sha256(savedZip.bytes),
+        hasMark: true,
+        fixtureValuesKept,
+        changedParts: changed,
+        unexpectedChangedParts: unexpected,
+      })
   } else {
     noteStep('S4 save to backing file (Cmd+S)', false, 'marker not in sheet1.xml/sharedStrings.xml within 20s')
   }
@@ -186,10 +228,10 @@ try {
   const echo2 = await waitForEcho(page2, 'G11')
   const reopenOk = echo2.ok
   await page2.screenshot({ path: join(shotDir, 's6-reopen.png') })
-  noteStep('S6 fresh-context reopen (G11 targeted; content vision-verified)', reopenOk, {
-    echo: echo2,
-    visionEvidence: 'shots-xlsx/s6-reopen.png (G11=XLSX-SLICE-…, G12=777, formula bar marker, fixture intact)',
-  })
+  visionLeg('S6 fresh-context reopen (G11 targeted; content vision-verified)', reopenOk,
+    join(shotDir, 's6-reopen.png'),
+    'G11 shows the XLSX-SLICE marker, G12 shows 777, the formula bar shows the marker, fixture values intact',
+    { echo: echo2 })
   await ctx2.close()
 
   // S7: original-engine re-parse via the app binary

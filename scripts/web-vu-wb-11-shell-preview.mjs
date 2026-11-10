@@ -77,6 +77,10 @@ try {
   const pages = {}
   for (const o of openers) {
     const p = await ctx.newPage()
+    // QA 1차 P1-E: the error claim covers console errors, not just pageerror
+    p.on('console', (m) => {
+      if (m.type() === 'error') errors.push(`console-${o.id}:${m.text().slice(0, 200)}`)
+    })
     p.on('pageerror', (e) => errors.push(`pageerror-${o.id}:${String(e).slice(0, 200)}`))
     await p.goto(o.url, { waitUntil: 'domcontentloaded', timeout: 30000 })
     await p.waitForSelector('#root', { timeout: 60000 })
@@ -96,22 +100,64 @@ try {
   noteStep('P3 three apps mounted in parallel tabs',
     Object.values(states).every((s) => s.hasClient && s.rootChildren > 0), states)
 
-  // P4: cross-tab isolation — edit in docs (Cmd+S through the menu-action path
-  // was VU-WB-01b's S4; here just verify the tabs stay independent and the
-  // diagram tab keeps its shape echo while docs holds its own state)
-  const dEcho = await pages.diagram.evaluate(() => {
-    const f = document.querySelector('iframe')
-    return [...(f?.contentDocument?.querySelectorAll('foreignObject div') ?? [])]
-      .map((e) => e.textContent.trim()).some((t) => t.includes('VU-WB-10'))
-  })
-  const mEcho = await pages.mindmap.evaluate(() =>
-    [...document.querySelectorAll('span.text')].some((e) => (e.textContent || '').includes('중심')),
-  )
-  const docEcho = (await pages.docs.evaluate(() => document.body.innerText)).includes('fixture')
-  noteStep('P4 cross-tab isolation (each tab keeps its own document state)',
-    dEcho && mEcho && docEcho, { diagramShape: dEcho, mindmapTopic: mEcho, docsText: docEcho })
+  // P4 (QA 1차 P1-E): EDIT-MID-TAB isolation — two tabs of the SAME app, each
+  // with its own marker edit and save; the other tab must not see it; closing
+  // one leaves the other fully usable. DOM-verifiable through mindmap topics.
+  const mkMark = (pfx) => `${pfx}-${Date.now()}`
+  const MARK_A = mkMark('TAB-A')
+  const MARK_B = mkMark('TAB-B')
+  const topicTexts = (p) => p.evaluate(() => [...document.querySelectorAll('span.text')].map((e) => e.textContent))
+  const addTopic = async (p, mark) => {
+    await p.evaluate(() => {
+      const e = [...document.querySelectorAll('span.text')].find((x) => (x.textContent || '').includes('중심'))
+      const r = e.getBoundingClientRect()
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+    }).then((b) => p.mouse.click(b.x, b.y))
+    await p.waitForTimeout(500)
+    await p.keyboard.press('Tab')
+    await p.waitForTimeout(700)
+    await p.keyboard.type(mark)
+    await p.keyboard.press('Enter')
+    await p.waitForTimeout(700)
+  }
 
-  for (const p of Object.values(pages)) await p.close()
+  // two more tabs of the SAME app (mindmap)
+  const mmTabs = {}
+  for (const [key, mark] of [['a', MARK_A], ['b', MARK_B]]) {
+    const p = await ctx.newPage()
+    p.on('pageerror', (e) => { errors.push(`pageerror-mm${key}:${String(e).slice(0, 200)}`) })
+    await p.goto(withToken('/mindmap/?new=1'), { waitUntil: 'domcontentloaded', timeout: 30000 })
+    await p.waitForSelector('#root', { timeout: 60000 })
+    await p.waitForTimeout(6000)
+    await addTopic(p, mark)
+    mmTabs[key] = p
+  }
+  const ta = await topicTexts(mmTabs.a)
+  const tb = await topicTexts(mmTabs.b)
+  const isolated =
+    ta.some((t) => t.includes(MARK_A)) && !ta.some((t) => t.includes(MARK_B)) &&
+    tb.some((t) => t.includes(MARK_B)) && !tb.some((t) => t.includes(MARK_A))
+  noteStep('P4a same-app parallel tabs, per-tab edits stay isolated (machine echo)',
+    isolated, { tabA: ta.slice(0, 4), tabB: tb.slice(0, 4), MARK_A, MARK_B })
+
+  // close tab A; tab B must remain fully usable (another edit lands)
+  await mmTabs.a.close()
+  const MARK_B2 = mkMark('TAB-B2')
+  await addTopic(mmTabs.b, MARK_B2)
+  const tb2 = await topicTexts(mmTabs.b)
+  const bAlive = tb2.some((t) => t.includes(MARK_B2)) && tb2.some((t) => t.includes(MARK_B))
+  noteStep('P4b after closing one tab the other stays fully usable', bAlive, {
+    topicsAfterClose: tb2.slice(0, 5),
+  })
+
+  // the other apps' tabs were not disturbed
+  const docEcho = (await pages.docs.evaluate(() => document.body.innerText)).includes('fixture')
+  const dMounted = await pages.diagram.evaluate(() => Boolean(window.__genofficeWebClient))
+  noteStep('P4c other app tabs undisturbed', docEcho && dMounted, {
+    docsText: docEcho, diagramMounted: dMounted,
+  })
+
+  for (const p of [...Object.values(pages), mmTabs.b]) await p.close()
   await home.close()
 } finally {
   await browser.close()

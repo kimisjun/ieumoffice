@@ -147,7 +147,7 @@ try {
   } : { menuClick: clicked, detail: 'file unchanged or marker missing within 15s' })
 
   // S5: convert/export leg — epub is a convert TARGET only (supported-list evidence)
-  noteStep('S5 download/convert leg', false, {
+  noteStep('S5 download/convert leg: NOT_RUN (epub is a convert target only)', false, {
     detail: 'NOT_RUN: CLI convert supported routes carry no epub SOURCE (supported-list evidence); app exports are dialog-driven',
   })
 
@@ -167,29 +167,63 @@ try {
   })
   await ctx2.close()
 
-  // S7: package re-parse — the marker must be in the epub content XHTML
+  // S7: ENGINE re-parse — epub-engine's own openEpub parses the saved bytes;
+  // the marker must be in the chapter text the ENGINE reads (QA P1-B: not a
+  // zip-string grep)
   let reparse = { ok: false }
   try {
-    const all = execFileSync('unzip', ['-p', file], { maxBuffer: 64 * 1024 * 1024 }).toString('latin1')
+    const out = execFileSync('npx', ['tsx', 'scripts/engine-parse-vu.ts', 'epub', file, MARK], {
+      cwd: root, encoding: 'utf8', timeout: 120000,
+    })
+    const parsed = JSON.parse(out.trim().split('\n').pop() ?? '{}')
+    const out2 = execFileSync('npx', ['tsx', 'scripts/engine-parse-vu.ts', 'epub', file, FIXTURE], {
+      cwd: root, encoding: 'utf8', timeout: 120000,
+    })
+    const parsedFix = JSON.parse(out2.trim().split('\n').pop() ?? '{}')
     reparse = {
-      ok: all.includes(MARK) && all.includes(FIXTURE),
-      hasMark: all.includes(MARK), hasFixture: all.includes(FIXTURE),
+      ok: parsed.status === 'ok' && parsed.needles?.[MARK] === true && parsedFix.needles?.[FIXTURE] === true,
+      status: parsed.status,
+      chapterCount: parsed.chapterCount,
+      markerInParsedChapters: parsed.needles?.[MARK] ?? false,
+      fixtureInParsedChapters: parsedFix.needles?.[FIXTURE] ?? false,
     }
   } catch (e) { reparse = { ok: false, error: String(e).slice(0, 250) } }
-  noteStep('S7 package re-parse (epub zip content)', reparse.ok === true, reparse)
+  noteStep('S7 engine re-parse (epub-engine openEpub reads the saved bytes)', reparse.ok === true, reparse)
 
   await ctx1.close()
 } finally {
   await browser.close()
 }
 
+// QA 1차 P0-D: every leg is counted and the verdict separates
+// PASS / FAIL / NOT_RUN — a leg that did not run is never dropped into success
+const isNotRun = (r) => /NOT_RUN/.test(r.step) || r.status === 'NOT_RUN'
+const counts = {
+  pass: results.filter((r) => r.ok && !isNotRun(r)).length,
+  fail: results.filter((r) => !r.ok && !isNotRun(r)).length,
+  notRun: results.filter(isNotRun).length,
+  total: results.length,
+}
+const verdict = counts.fail > 0 ? 'FAIL' : counts.notRun > 0 ? 'PASS_WITH_NOT_RUN' : 'PASS'
 const summary = {
   slice: 'VU-WB-09 EPUB vertical slice (web bridge, chapter-iframe contenteditable, ieumoffice v0.12.11 @ b8cb8564b)',
   mark: MARK,
   results,
+  counts,
+  verdict,
   consoleOrPageErrors: errors.slice(0, 20),
-  allPassed: results.filter((r) => !r.step.startsWith('S5')).every((r) => r.ok),
+  // strict: every leg ran AND passed
+  allPassed: counts.total > 0 && counts.pass === counts.total,
+  // the acceptance criterion: no required leg failed (NOT_RUN legs are
+  // optional and carry their reason in the step name)
+  requiredPassed: counts.fail === 0,
 }
 writeFileSync('/tmp/web-e2e/vu-wb-09-epub-e2e.json', JSON.stringify(summary, null, 2))
-console.log('SUMMARY', JSON.stringify({ allPassed: summary.allPassed, errors: summary.consoleOrPageErrors.length }))
-process.exit(summary.allPassed ? 0 : 1)
+console.log('SUMMARY', JSON.stringify({
+  verdict: summary.verdict,
+  counts: summary.counts,
+  allPassed: summary.allPassed,
+  requiredPassed: summary.requiredPassed,
+  errors: summary.consoleOrPageErrors.length,
+}))
+process.exit(summary.requiredPassed ? 0 : 1)

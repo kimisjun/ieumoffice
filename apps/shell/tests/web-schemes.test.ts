@@ -50,4 +50,31 @@ describe('web bridge scheme rewriting', () => {
     const out = rewriteOut('docs', { when: date })
     expect((out as { when: Date }).when).toBe(date)
   })
+
+  // QA 1차 P0-A: rewriting must be scoped to the URL form — document text
+  // carrying bare scheme names or web prefixes round-trips byte-identically
+  it('leaves document text with bare scheme names untouched (lossless round-trip)', () => {
+    const body = 'Literal /__mdasset and md-asset. Also __media and genoffice-docx-media.'
+    expect(rewriteOut('markdown', body)).toBe(body)
+    expect(rewriteIn('markdown', body)).toBe(body)
+    expect(rewriteIn('markdown', rewriteOut('markdown', body))).toBe(body)
+    expect(rewriteOut('docs', body)).toBe(body)
+  })
+
+  it('still rewrites URL fields inside a mixed payload', () => {
+    const mixed = {
+      note: 'text with bare md-asset and /__mdasset words',
+      src: 'md-asset://h/p.png',
+    }
+    const out = rewriteOut('markdown', mixed) as typeof mixed
+    expect(out.note).toBe('text with bare md-asset and /__mdasset words')
+    expect(out.src).toBe('/__mdasset://h/p.png')
+  })
+
+  it('does not double-rewrite already-rewritten literals', () => {
+    const web = { src: '/__mdasset://h/p' }
+    expect(rewriteOut('markdown', web)).toEqual(web) // already web form
+    const desk = { src: 'md-asset://h/p' }
+    expect(rewriteIn('markdown', desk)).toEqual(desk) // already scheme form
+  })
 })

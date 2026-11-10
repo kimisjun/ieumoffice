@@ -123,7 +123,10 @@ export function injectIntoHtml(html: string, injection: string, reqHost: string)
   // `/__media:`-shaped text (the bundles are separate files).
   html = html.replace(/\/__(?:media|mdasset|preview|htmlasset):/g, '')
   const wsSource = `ws://${reqHost}`
-  html = html.replace(/connect-src ([^"]*?)(?=")/, (m, list: string) =>
+  // QA 1차 P2: `[^";]*` stops at the directive boundary — the old lazy
+  // `[^"]*?(?=")` swallowed the rest of the policy and appended the ws source
+  // after base-uri 'none' instead of inside connect-src
+  html = html.replace(/connect-src ([^";]*)/, (m, list: string) =>
     list.includes(wsSource) ? m : `connect-src ${list} ${wsSource}`,
   )
   // the html app's preview pane iframes /__preview://… — same-origin after the
@@ -131,7 +134,7 @@ export function injectIntoHtml(html: string, injection: string, reqHost: string)
   // serving origin, so the browser blocks the frame (frame-src violation).
   // Frame the page's own origin like the WebSocket above.
   const httpSource = `http://${reqHost}`
-  html = html.replace(/frame-src ([^"]*?)(?=")/, (m, list: string) =>
+  html = html.replace(/frame-src ([^";]*)/, (m, list: string) =>
     list.includes("'self'") ? m : `frame-src ${list} 'self' ${httpSource}`,
   )
   const moduleScript = /<script[^>]*type="module"[^>]*>/
@@ -197,10 +200,11 @@ async function serveMarkdownMedia(res: ServerResponse, pathname: string): Promis
 
 /** GET /__htmlasset://local/<encoded path> → assets next to an open html file.
  *  The scheme's fixed `local` host survives the rewrite, so it stays in rest. */
-async function serveHtmlMedia(res: ServerResponse, pathname: string): Promise<boolean> {
+async function serveHtmlMedia(req: IncomingMessage, res: ServerResponse, pathname: string): Promise<boolean> {
   const rest = pathname.replace(/^\/__htmlasset:\/\//, '')
   if (rest === pathname) return false
-  await sendResponse(res, await serveHtmlAsset(`html-asset://${rest}`))
+  // forward the browser's Accept: it picks the slot for extensionless assets
+  await sendResponse(res, await serveHtmlAsset(`html-asset://${rest}`, req.headers.accept ?? '*/*'))
   return true
 }
 
@@ -303,9 +307,9 @@ export function originHostOk(req: IncomingMessage, bound: { host: string; port: 
 function unauthorized(res: ServerResponse): void {
   res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8' })
   res.end(
-    '<!doctype html><meta charset="utf-8"><title>GenOffice Web</title>' +
-      '<p style="font-family:sans-serif">This GenOffice web service requires its access token. ' +
-      'Open the URL the app printed at startup (it includes <code>?token=…</code>).</p>',
+    '<!doctype html><meta charset="utf-8"><title>이음오피스 Web</title>' +
+    '<p style="font-family:sans-serif">이음오피스 웹 서비스는 접근 토큰이 필요합니다. ' +
+    '앱이 시작할 때 출력한 주소( <code>?token=…</code> 포함)로 열어 주세요.</p>',
   )
 }
 
@@ -327,7 +331,7 @@ function launcherHtml(): string {
   const links = apps
     .map(([id, label]) => `<a class="card" href="/${id}/"><b>${label}</b><span>/${id}/</span></a>`)
     .join('')
-  return `<!doctype html><html><head><meta charset="utf-8"><title>GenOffice Web</title>
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>이음오피스 Web</title>
 <style>
 /* standalone page without the design-token stylesheet: every var() carries
    the light-theme value as fallback so the launcher still reads correctly */
@@ -338,11 +342,109 @@ h1{font-size:20px}p{color:var(--text-secondary,#606366);font-size:14px}
 .card span{color:var(--text-secondary,#606366);font-size:12px}
 .card:hover{border-color:var(--accent,#0969da);background:var(--hover,#f5f5f5)}
 </style></head><body>
-<h1>GenOffice Web</h1>
-<p>The desktop suite's engines, editing in a browser tab. Open a document from an
-app's start screen; files are read and written by the local service.</p>
+<h1>이음오피스 Web</h1>
+<p>데스크톱 문서 엔진을 브라우저 탭에서 그대로 씁니다. 각 앱의 시작 화면에서 문서를 열면,
+파일은 이 컴퓨터의 로컬 서비스가 읽고 저장합니다.</p>
 <div class="grid">${links}</div>
 </body></html>`
+}
+
+/**
+ * draw.io's offline bundle for the diagram app over HTTP — a mirror of
+ * drawio-protocol.ts (same refusal rules via resolveDrawioRequest, same
+ * index.html bridge-script injection, same CSP). Only in web mode: desktop
+ * keeps the drawio-app:// scheme.
+ *
+ * Served WITHOUT the token (QA 1차 P0-C): the mirror is the same editor bytes
+ * for everyone and carries no user data, and the isolated frame must never be
+ * handed the secret — a token in the frame URL would be readable by the very
+ * code the isolation is defending against. The print document is the one
+ * target with user content, so it stays behind the token.
+ *
+ * QA 1차 P0-E: the packaged build copies apps/diagram/out to
+ * resources/modules/diagram (electron-builder.cjs), so the dev `out/` paths
+ * must not be assumed at runtime.
+ */
+function diagramOutPath(...parts: string[]): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'modules', 'diagram', ...parts)
+    : join(app.getAppPath(), '..', 'diagram', 'out', ...parts)
+}
+
+/** the frame runs on the OTHER loopback host (localhost ↔ 127.0.0.1) so it is
+ *  cross-origin from the app page; frame-ancestors must cover the parent on
+ *  either host */
+function loopbackAncestors(reqHost: string): string[] {
+  const port = reqHost.includes(':') ? reqHost.slice(reqHost.lastIndexOf(':')) : ''
+  return [`http://127.0.0.1${port}`, `http://localhost${port}`]
+}
+
+function serveDrawioArea(
+  req: IncomingMessage,
+  res: ServerResponse,
+  pathname: string,
+  reqHost: string,
+  options: { token: string },
+): boolean {
+  if (pathname === '/__ieum/bridge.js') {
+    const bridgeFile = diagramOutPath('bridge', 'bridge.js')
+    if (existsSync(bridgeFile)) {
+      res.writeHead(200, responseHeaders('text/javascript; charset=utf-8', drawioCsp([])))
+      res.end(readFileSync(bridgeFile))
+    } else {
+      res.writeHead(404, { 'Content-Type': 'text/plain' })
+      res.end('diagram bridge is not built')
+    }
+    return true
+  }
+  // QA 1차 P2: hand the resolver the ENCODED path exactly as the desktop
+  // protocol handler sees it — decoding first would let `js%2fapp.min.js`
+  // slip past the refusal rules the original resolver applies
+  const rawPath = new URL(req.url ?? '/', 'http://localhost').pathname
+  const drawioMount = /^\/__drawio\/(.*)$/.exec(rawPath)
+  if (!drawioMount) return false
+  const drawioDir = diagramOutPath('drawio')
+  const target = resolveDrawioRequest(drawioDir, `drawio-app://editor/${drawioMount[1] || 'index.html'}`)
+  const csp = drawioCsp(loopbackAncestors(reqHost), "'self'")
+  switch (target.kind) {
+    case 'refused':
+      res.writeHead(target.status, { 'Content-Type': 'text/plain' })
+      res.end('refused')
+      return true
+    case 'bridge':
+      res.writeHead(200, responseHeaders('text/javascript; charset=utf-8', csp))
+      res.end(readFileSync(diagramOutPath('bridge', 'bridge.js')))
+      return true
+    case 'print': {
+      // the print document carries user content — token required even though
+      // the static mirror itself is open
+      if (!tokenValid(req, options.token, reqHost.includes(':') ? Number(reqHost.slice(reqHost.lastIndexOf(':') + 1)) : 0)) {
+        unauthorized(res)
+        return true
+      }
+      const html = takePrintDocument(target.token)
+      if (html === null) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' })
+        res.end('no print document')
+      } else {
+        res.writeHead(200, responseHeaders('text/html; charset=utf-8', PRINT_PAGE_CSP))
+        res.end(html)
+      }
+      return true
+    }
+    case 'file': {
+      if (target.relative !== 'index.html') {
+        res.writeHead(200, responseHeaders(contentTypeOf(target.path), csp))
+        res.end(readFileSync(target.path))
+        return true
+      }
+      res.writeHead(200, responseHeaders('text/html; charset=utf-8', csp))
+      res.end(injectBridge(readFileSync(target.path, 'utf8')))
+      return true
+    }
+    default:
+      return false
+  }
 }
 
 /** one request: static bundles, media routes, launcher; returns false when the
@@ -352,6 +454,14 @@ export async function serveWebStatic(
   res: ServerResponse,
   options: { roots: RendererRoots; token: string; port: number },
 ): Promise<boolean> {
+  const url = new URL(req.url ?? '/', 'http://localhost')
+  const pathname = decodeURIComponent(url.pathname)
+  const reqHost = req.headers.host ?? '127.0.0.1'
+
+  // unauthenticated static surface: draw.io mirror + frame bridge (see
+  // serveDrawioArea) — no user data, and the frame must not see the token
+  if (serveDrawioArea(req, res, pathname, reqHost, options)) return true
+
   if (!tokenValid(req, options.token, options.port)) {
     unauthorized(res)
     return true
@@ -359,7 +469,6 @@ export async function serveWebStatic(
   const setCookie = tokenCookieHeader(req, options.token, options.port)
   if (setCookie) res.setHeader('Set-Cookie', setCookie)
 
-  const url = new URL(req.url ?? '/', 'http://localhost')
   // the printed URL carries ?token=…; once the cookie is set, bounce to the
   // token-less form so the secret never lands in history or the Referer
   if (url.searchParams.has('token')) {
@@ -369,7 +478,6 @@ export async function serveWebStatic(
     res.end()
     return true
   }
-  const pathname = decodeURIComponent(url.pathname)
 
   if (pathname === '/' || pathname === '') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
@@ -377,11 +485,10 @@ export async function serveWebStatic(
     return true
   }
 
-  const reqHost = req.headers.host ?? '127.0.0.1'
   const media = await serveDocsMedia(res, pathname)
   if (media) return true
   if (await serveMarkdownMedia(res, pathname)) return true
-  if (await serveHtmlMedia(res, pathname)) return true
+  if (await serveHtmlMedia(req, res, pathname)) return true
   if (servePreview(res, pathname)) return true
 
   if (pathname.startsWith('/__web/')) {
@@ -405,60 +512,7 @@ export async function serveWebStatic(
     return true
   }
 
-  // draw.io's offline bundle for the diagram app over HTTP — a mirror of
-  // drawio-protocol.ts (same refusal rules via resolveDrawioRequest, same
-  // index.html bridge-script injection, same CSP). Only in web mode: desktop
-  // keeps the drawio-app:// scheme. The bridge script keeps its own path
-  // because the frame bridge is built to load it from /__ieum/bridge.js.
-  if (pathname === '/__ieum/bridge.js') {
-    const bridgeFile = join(app.getAppPath(), '..', 'diagram', 'out', 'bridge', 'bridge.js')
-    if (existsSync(bridgeFile)) {
-      res.writeHead(200, responseHeaders('text/javascript; charset=utf-8', drawioCsp([])))
-      res.end(readFileSync(bridgeFile))
-    } else {
-      res.writeHead(404, { 'Content-Type': 'text/plain' })
-      res.end('diagram bridge is not built')
-    }
-    return true
-  }
-  const drawioMount = /^\/__drawio\/(.*)$/.exec(pathname)
-  if (drawioMount) {
-    const drawioDir = join(app.getAppPath(), '..', 'diagram', 'out', 'drawio')
-    const origin = `http://${req.headers.host ?? reqHost}`
-    const target = resolveDrawioRequest(drawioDir, `drawio-app://editor/${drawioMount[1] || 'index.html'}`)
-    const csp = drawioCsp([origin], "'self'")
-    switch (target.kind) {
-      case 'refused':
-        res.writeHead(target.status, { 'Content-Type': 'text/plain' })
-        res.end('refused')
-        return true
-      case 'bridge':
-        res.writeHead(200, responseHeaders('text/javascript; charset=utf-8', csp))
-        res.end(readFileSync(join(app.getAppPath(), '..', 'diagram', 'out', 'bridge', 'bridge.js')))
-        return true
-      case 'print': {
-        const html = takePrintDocument(target.token)
-        if (html === null) {
-          res.writeHead(404, { 'Content-Type': 'text/plain' })
-          res.end('no print document')
-        } else {
-          res.writeHead(200, responseHeaders('text/html; charset=utf-8', PRINT_PAGE_CSP))
-          res.end(html)
-        }
-        return true
-      }
-      case 'file': {
-        if (target.relative !== 'index.html') {
-          res.writeHead(200, responseHeaders(contentTypeOf(target.path), csp))
-          res.end(readFileSync(target.path))
-          return true
-        }
-        res.writeHead(200, responseHeaders('text/html; charset=utf-8', csp))
-        res.end(injectBridge(readFileSync(target.path, 'utf8')))
-        return true
-      }
-    }
-  }
+  if (serveDrawioArea(req, res, pathname, reqHost, options)) return true
 
 const mount = /^\/([a-z]+)(\/.*)?$/.exec(pathname)
   if (mount) {

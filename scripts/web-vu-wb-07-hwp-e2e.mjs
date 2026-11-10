@@ -114,7 +114,11 @@ try {
     hasHwpApi: typeof (window.hwpApi && window.hwpApi.consumePending) === 'function',
   }))
   const st = await studioState(page)
-  noteStep('S1 renderer + studio mount (Chrome)', bridge.hasClient && bridge.hasHwpApi && st.hasIframe, { bridge, studio: st })
+  // QA 1차 P1-C: the boot retry count is recorded, not hidden
+  noteStep('S1 renderer + studio mount (Chrome)', bridge.hasClient && bridge.hasHwpApi && st.hasIframe, {
+    bridge, studio: st,
+    boot: { loaded: boot.loaded, reloads: boot.attempt, firstBootOk: boot.attempt === 0 },
+  })
 
   // S2: the studio hosts the seeded file (machine: iframe title names the file)
   const inBytes = readFileSync(file)
@@ -132,16 +136,24 @@ try {
   await page.screenshot({ path: join(shotDir, 's3-edited.png') })
   noteStep('S3 caret edit in original editor', true, { mark: MARK, activeAfterClick: (await studioState(page)).active })
 
-  // S4: dispatch the app's own file-command contract event (FILE_COMMAND_EVENT
-  // 'ieum:file-command' — exactly what the studio's 저장 menu item produces;
-  // App.tsx forwards it to requestFileCommand('save') once phase is 'ready'),
-  // then also press ⌘S, then poll the file
-  await page.evaluate(() => {
-    const w = document.querySelector('iframe').contentWindow
-    w.dispatchEvent(new CustomEvent('ieum:file-command', { detail: 'save' }))
-  })
+  // S4 (QA 1차 P1-C): the USER key path goes first — only if ⌘S alone does not
+  // save does the harness fall back to the app's own file-command contract
+  // event, and the path that worked is recorded either way.
+  let savePath = 'user-key-CmdS'
   await page.keyboard.press('Meta+s')
   let saved = null
+  let userKeyChanged = false
+  for (let i = 0; i < 12 && !userKeyChanged; i++) {
+    await new Promise((r) => setTimeout(r, 600))
+    try { userKeyChanged = !readFileSync(file).equals(inBytes) } catch { /* still saving */ }
+  }
+  if (!userKeyChanged) {
+    savePath = 'internal-event-fallback (ieum:file-command)'
+    await page.evaluate(() => {
+      const w = document.querySelector('iframe').contentWindow
+      w.dispatchEvent(new CustomEvent('ieum:file-command', { detail: 'save' }))
+    })
+  }
   for (let i = 0; i < 50 && !saved; i++) {
     await new Promise((r) => setTimeout(r, 600))
     try {
@@ -156,12 +168,14 @@ try {
     } catch { /* still saving */ }
   }
   if (saved && !saved.markerMiss) {
-    noteStep('S4 save to backing file (studio ⌘S)', true, {
+    noteStep('S4 save to backing file (user path first)', true, {
+      savePath,
       size: saved.bytes.length, sha256: sha256(saved.bytes),
       markerInPackage: true, fixtureKept: saved.xml.includes('VU-WB-07'),
     })
   } else {
-    noteStep('S4 save to backing file (studio ⌘S)', false, {
+    noteStep('S4 save to backing file (user path first)', false, {
+      savePath,
       changed: !!saved, detail: saved ? 'package changed but marker not in Contents/section0.xml' : 'file unchanged within 18s',
     })
   }
@@ -181,7 +195,11 @@ try {
     const fresh = after.filter((f) => !before.has(f))
     exportRes = { ok: fresh.length > 0, freshPdfs: fresh }
   } catch (e) { exportRes = { ok: false, error: String(e).slice(0, 150) } }
-  noteStep('S5 export leg (PDF로 내보내기, best-effort)', exportRes.ok === true, {
+  noteStep(
+    exportRes.ok
+      ? 'S5 export leg (PDF로 내보내기, best-effort)'
+      : 'S5 export leg: NOT_RUN (optional leg — the best-effort export attempt did not complete)',
+    exportRes.ok === true, {
     ...exportRes,
     fallbackNote: 'CLI convert has NO hwpx source routes (supported-list evidence) — export leg is app-driven only; recorded as NOT_RUN when no PDF appears',
   })
@@ -212,13 +230,43 @@ try {
   await browser.close()
 }
 
+// QA 1차 P0-D: every leg is counted and the verdict separates
+// PASS / FAIL / NOT_RUN — a leg that did not run is never dropped into success
+const isNotRun = (r) => /NOT_RUN/.test(r.step) || r.status === 'NOT_RUN'
+const counts = {
+  pass: results.filter((r) => r.ok && !isNotRun(r)).length,
+  fail: results.filter((r) => !r.ok && !isNotRun(r)).length,
+  notRun: results.filter(isNotRun).length,
+  total: results.length,
+}
+const verdict = counts.fail > 0 ? 'FAIL' : counts.notRun > 0 ? 'PASS_WITH_NOT_RUN' : 'PASS'
 const summary = {
   slice: 'VU-WB-07 HWP vertical slice (web bridge, rhwp-studio canvas editing, ieumoffice v0.12.11 @ b8cb8564b)',
   mark: MARK,
   results,
+  // QA 1차 P1-C: boot retries and the save path that worked are findings,
+  // recorded per run — the original editor's boot race stays a product note
+  productFindings: {
+    boot: typeof boot !== 'undefined' ? { reloads: boot.attempt, firstBootOk: boot.attempt === 0 } : null,
+    reopenBoot: typeof boot6 !== 'undefined' ? { reloads: boot6.attempt, firstBootOk: boot6.attempt === 0 } : null,
+    savePath: typeof savePath !== 'undefined' ? savePath : null,
+    note: 'the original rhwp-studio boot race (blank studio on first load) is a P1 product finding; retries are counted here, not hidden',
+  },
+  counts,
+  verdict,
   consoleOrPageErrors: errors.slice(0, 20),
-  allPassed: results.filter((r) => !r.step.startsWith('S5')).every((r) => r.ok),
+  // strict: every leg ran AND passed
+  allPassed: counts.total > 0 && counts.pass === counts.total,
+  // the acceptance criterion: no required leg failed (NOT_RUN legs are
+  // optional and carry their reason in the step name)
+  requiredPassed: counts.fail === 0,
 }
 writeFileSync('/tmp/web-e2e/vu-wb-07-hwp-e2e.json', JSON.stringify(summary, null, 2))
-console.log('SUMMARY', JSON.stringify({ allPassed: summary.allPassed, errors: summary.consoleOrPageErrors.length }))
-process.exit(summary.allPassed ? 0 : 1)
+console.log('SUMMARY', JSON.stringify({
+  verdict: summary.verdict,
+  counts: summary.counts,
+  allPassed: summary.allPassed,
+  requiredPassed: summary.requiredPassed,
+  errors: summary.consoleOrPageErrors.length,
+}))
+process.exit(summary.requiredPassed ? 0 : 1)

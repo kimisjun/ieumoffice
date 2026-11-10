@@ -4,7 +4,7 @@
  * Data only; the bridge applies it inside the frame and the tests read it.
  */
 import type { Lang } from '@genoffice/i18n'
-import { DRAWIO_ORIGIN } from './bridge-protocol'
+import { DRAWIO_ORIGIN, webDrawioOrigin } from './bridge-protocol'
 
 /** draw.io's language code for each app language (draw.io ships all 21). */
 export function drawioLang(lang: Lang): string {
@@ -34,10 +34,13 @@ export function drawioStartUrl(options: { lang: Lang; dark: boolean }): string {
   ]
   if (options.dark) params.push(['dark', '1'])
   // web mode (real browser): the custom scheme does not exist there; the web
-  // server mirrors the drawio-protocol contract at /__drawio/ on this origin
+  // server mirrors the drawio-protocol contract at /__drawio/ — served from
+  // the OTHER loopback host so the frame is cross-origin from this page
+  // (QA 1차 P0-C). The mirror is unauthenticated static code, so the frame
+  // never sees the web token.
   const origin =
     typeof location !== 'undefined' && location.protocol.startsWith('http')
-      ? `${location.origin}/__drawio`
+      ? `${webDrawioOrigin()}/__drawio`
       : DRAWIO_ORIGIN
   return `${origin}/index.html?${params.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')}`
 }

@@ -248,13 +248,9 @@ export function mindmapFilePath(webContentsId: number): string | undefined {
  * renderer; a missing path means a new untitled map). */
 export function trackWebMindmapTab(webContents: WebContents, openPath?: string | null): void {
   registerMindmapIpc()
-  const wcId = webContents.id
-  if (openPath) {
-    openPathByWc.set(wcId, openPath)
-    const allowed = allowedByWc.get(wcId) ?? new Set<string>()
-    allowed.add(openPath)
-    allowedByWc.set(wcId, allowed)
-  }
+  // reuse the desktop tab lifecycle (QA 1차 P1-F): seeding AND the destroyed
+  // cleanup, window-open deny and navigation guard all live in grantAndTrack
+  grantAndTrack(webContents, openPath)
 }
 
 export function mindmapFileRenamed(contents: WebContents, oldPath: string, newPath: string): void {

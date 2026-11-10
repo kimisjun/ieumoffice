@@ -228,13 +228,9 @@ export function epubIsTranslationLocked(webContentsId: number): boolean {
  * renderer; a missing path means a new untitled book). */
 export function trackWebEpubTab(webContents: WebContents, openPath?: string | null): void {
   registerEpubIpc()
-  const wcId = webContents.id
-  if (openPath) {
-    openPathByWc.set(wcId, openPath)
-    const allowed = allowedByWc.get(wcId) ?? new Set<string>()
-    allowed.add(openPath)
-    allowedByWc.set(wcId, allowed)
-  }
+  // reuse the desktop tab lifecycle (QA 1차 P1-F): seeding AND the destroyed
+  // cleanup, window-open deny and navigation guard all live in grantAndTrack
+  grantAndTrack(webContents, openPath)
 }
 
 export function epubFileRenamed(contents: WebContents, oldPath: string, newPath: string): void {
