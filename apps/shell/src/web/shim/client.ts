@@ -45,8 +45,19 @@ function wsUrl(): string {
   return `${proto}//${location.host}${location.pathname}${location.search}`
 }
 
+// Boot-time frames used to be dropped silently when the socket was not OPEN
+// yet (a renderer's first invokes — e.g. hwp's consumePending — vanished and
+// the app booted without its document). Queue them and flush on open.
+const outbox: Record<string, unknown>[] = []
+
 function call(frame: Record<string, unknown>): void {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(encodeFrame(frame))
+  else outbox.push(frame)
+}
+
+function flushOutbox(): void {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return
+  for (const frame of outbox.splice(0)) ws.send(encodeFrame(frame))
 }
 
 function invoke(channel: string, args: unknown[]): Promise<unknown> {
@@ -126,6 +137,7 @@ function connect(): void {
   bootedAt = Date.now()
   const socket = new WebSocket(wsUrl())
   ws = socket
+  socket.onopen = () => flushOutbox()
   socket.onmessage = (ev) => onMessage(String(ev.data))
   socket.onclose = () => {
     ws = null
