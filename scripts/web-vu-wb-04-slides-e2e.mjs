@@ -10,7 +10,7 @@
 import { createRequire } from 'node:module'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync } from 'node:fs'
 import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -26,6 +26,9 @@ const shotDir = '/tmp/web-e2e/shots-slides'
 mkdirSync(shotDir, { recursive: true })
 
 const MARK = `SLIDES-SLICE-${Date.now()}`
+// each run starts from the pristine fixture — accumulated edits drift the
+// title box and break hit-testing for the next run
+copyFileSync('/tmp/web-e2e/deck-pristine.pptx', deck)
 const FIXTURE = 'VU-WB-04 SLIDES FIXTURE'
 const withToken = (path) => `${base}${path}${path.includes('?') ? '&' : '?'}token=${token}`
 const executablePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
@@ -146,14 +149,27 @@ try {
     'title shows VU-WB-04 SLIDES FIXTURE 서울, body shows item one',
     { fixture: deck, size: inBytes.length, sha256: sha256(inBytes), echo: echo2.echo })
 
-  // S3: edit the text in the overlay
-  await page.keyboard.press('Meta+ArrowDown')
-  await page.keyboard.type(` ${MARK}`)
-  await page.waitForTimeout(500)
+  // S3: edit the text in the overlay — REOPEN the box if the first attempt
+  // did not land (the AI toolbar sometimes intercepts the dblclick) and verify
+  // the typed marker through the overlay echo before trusting the edit
+  let editEcho = { ok: false, echo: [] }
+  for (let attempt = 0; attempt < 3 && !editEcho.ok; attempt++) {
+    if (attempt > 0) {
+      await page.keyboard.press('Escape')
+      await page.waitForTimeout(400)
+      await openTextBox(page, 630, 120, FIXTURE)
+    }
+    await page.keyboard.press('Meta+ArrowDown')
+    await page.keyboard.type(` ${MARK}`)
+    await page.waitForTimeout(500)
+    editEcho = await waitForEcho(page, MARK, 3000)
+  }
   await page.keyboard.press('Escape')
   await page.waitForTimeout(800)
   await page.screenshot({ path: join(shotDir, 's3-edited.png') })
-  noteStep('S3 text edit in original editor', true, { mark: MARK })
+  noteStep('S3 text edit in original editor (overlay echo)', editEcho.ok, {
+    mark: MARK, echo: editEcho.echo,
+  })
 
   // S4: Cmd+S through the web menu-action route → backing file
   await page.keyboard.press('Meta+s')
