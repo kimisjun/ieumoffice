@@ -30,6 +30,9 @@ const OWN_PREFIXES: Record<string, string[]> = {
  *  project folders, the start screen's file open, shared genoffice helpers) */
 const SHARED_PREFIXES = [
   'app:',
+  'ai:', // editor AI panels (settings/summarise/proofread); account and
+         // subscription lifecycle stay denied below and override this
+  'user:', // display identity chips (user:display-name)
   'node:',
   'project:',
   'home:',

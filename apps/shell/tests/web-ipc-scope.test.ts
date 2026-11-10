@@ -25,6 +25,15 @@ describe('web bridge IPC scope (QA 1차 P0-C)', () => {
     expect(channelAllowedForApp('hwp', 'diagram:open')).toBe(false)
   })
 
+  it('allows editor AI panel reads but not account lifecycle', () => {
+    expect(channelAllowedForApp('sheets', 'ai:get-settings')).toBe(true)
+    expect(channelAllowedForApp('slides', 'ai:tool-capabilities')).toBe(true)
+    expect(channelAllowedForApp('docs', 'user:display-name')).toBe(true)
+    // the denial overrides the allowance
+    expect(channelAllowedForApp('docs', 'ai:subscription-logout')).toBe(false)
+    expect(channelAllowedForApp('docs', 'ai:subscription-install')).toBe(false)
+  })
+
   it('allows the app namespace and the shared core', () => {
     expect(channelAllowedForApp('markdown', 'markdown:save')).toBe(true)
     expect(channelAllowedForApp('hwp', 'hwp:read-file')).toBe(true)
