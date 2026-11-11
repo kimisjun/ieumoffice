@@ -34,6 +34,7 @@ const SHARED_PREFIXES = [
          // subscription lifecycle stay denied below and override this
   'user:', // display identity chips (user:display-name)
   'node:',
+  'projectFolder:', // markdown project folder watching (local paths only)
   'project:',
   'home:',
   'files:',

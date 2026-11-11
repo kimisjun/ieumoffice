@@ -128,9 +128,9 @@ function stopBridge(): Promise<void> {
 describe('web bridge', () => {
   it('dispatches an invoke to the captured handler and replies', async () => {
     await startBridge()
-    ipcMainMock.handle('test:echo', (_event, a: string) => ({ echoed: a }))
+    ipcMainMock.handle('app:test-echo', (_event, a: string) => ({ echoed: a }))
     const client = await connect('/docs/')
-    client.ws.send(JSON.stringify({ t: 'invoke', id: 1, channel: 'test:echo', args: ['hi'] }))
+    client.ws.send(JSON.stringify({ t: 'invoke', id: 1, channel: 'app:test-echo', args: ['hi'] }))
     const reply = await client.next()
     expect(reply).toEqual({ t: 'reply', id: 1, ok: true, value: { echoed: 'hi' } })
     await stopBridge()
@@ -138,11 +138,11 @@ describe('web bridge', () => {
 
   it('reports handler errors instead of crashing the tab', async () => {
     await startBridge()
-    ipcMainMock.handle('test:boom', () => {
+    ipcMainMock.handle('app:test-boom', () => {
       throw new Error('kaput')
     })
     const client = await connect('/docs/')
-    client.ws.send(JSON.stringify({ t: 'invoke', id: 2, channel: 'test:boom', args: [] }))
+    client.ws.send(JSON.stringify({ t: 'invoke', id: 2, channel: 'app:test-boom', args: [] }))
     const reply = await client.next()
     expect(reply.ok).toBe(false)
     expect(String(reply.error)).toContain('kaput')
@@ -208,7 +208,7 @@ describe('web bridge', () => {
 
   it('hands binary invoke args and results through the codec', async () => {
     await startBridge()
-    ipcMainMock.handle('test:save', (_event, data: unknown) => {
+    ipcMainMock.handle('app:test-save', (_event, data: unknown) => {
       const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : (data as Uint8Array)
       expect([...bytes]).toEqual([1, 2, 3])
       return { saved: true, echo: Buffer.from([4, 5]) }
@@ -219,7 +219,7 @@ describe('web bridge', () => {
       JSON.stringify({
         t: 'invoke',
         id: 9,
-        channel: 'test:save',
+        channel: 'app:test-save',
         args: [{ __genofficeBytes: Buffer.from(new Uint8Array(payload)).toString('base64') }],
       }),
     )
@@ -236,9 +236,9 @@ describe('web bridge', () => {
   it('runs fire-and-forget send listeners', async () => {
     await startBridge()
     const seen: unknown[][] = []
-    ipcMainMock.on('test:note', (...args: unknown[]) => seen.push(args))
+    ipcMainMock.on('app:test-note', (...args: unknown[]) => seen.push(args))
     const client = await connect('/docs/')
-    client.ws.send(JSON.stringify({ t: 'send', channel: 'test:note', args: ['hello'] }))
+    client.ws.send(JSON.stringify({ t: 'send', channel: 'app:test-note', args: ['hello'] }))
     await new Promise((r) => setTimeout(r, 100))
     expect(seen).toHaveLength(1)
     expect(seen[0][1]).toBe('hello')

@@ -84,7 +84,8 @@ describe('web static serving', () => {
   it('serves the launcher at /', async () => {
     const res = await get({}, '/')
     expect(res.status).toBe(200)
-    expect(String(res.body)).toContain('GenOffice Web')
+    // user-facing product name is Korean/IeumOffice (P2 language rule)
+    expect(String(res.body)).toContain('이음오피스 Web')
   })
 
   it('serves index.html with the bridge injected and CSP widened', async () => {
