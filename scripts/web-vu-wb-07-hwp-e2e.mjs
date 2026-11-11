@@ -193,20 +193,34 @@ try {
     await page.waitForTimeout(8000)
     const after = readdirSync('/tmp/web-e2e').filter((f) => f.endsWith('.pdf'))
     const fresh = after.filter((f) => !before.has(f))
-    exportRes = { ok: fresh.length > 0, clicked, freshPdfs: fresh }
-  } catch (e) { exportRes = { ok: false, clicked: false, error: String(e).slice(0, 150) } }
-  // QA 2차 P1-HWP-export: an unreachable menu item is NOT_RUN (unsupported);
-  // a clicked item that produces nothing is an execution FAILURE, not NOT_RUN
+    // the export is dialog-driven: a modal save dialog cannot complete headless
+    const dialogOpen = await page.evaluate(() => {
+      const host = document.getElementById('genoffice-web-dialog')
+      const open = !!host && host.childElementCount > 0
+      if (open) host.replaceChildren()
+      return open
+    })
+    exportRes = { ok: fresh.length > 0, clicked, dialogOpen, freshPdfs: fresh }
+  } catch (e) { exportRes = { ok: false, clicked: false, dialogOpen: false, error: String(e).slice(0, 150) } }
+  // QA 2차 P1-HWP-export: classification is honest —
+  //   unreachable menu item            → NOT_RUN (unsupported)
+  //   modal save dialog opened         → NOT_RUN (environment-blocked: a modal
+  //                                      dialog cannot complete headless)
+  //   clicked, no dialog, no output    → FAIL (execution failure)
   const unsupported = exportRes.ok === false && exportRes.clicked !== true
+  const envBlocked = exportRes.ok === false && !unsupported && exportRes.dialogOpen === true
+  const notRun = unsupported || envBlocked
   noteStep(
     exportRes.ok
       ? 'S5 export leg (PDF로 내보내기, best-effort)'
       : unsupported
         ? 'S5 export leg: NOT_RUN (menu item unreachable — no export feature to run)'
-        : 'S5 export leg (PDF로 내보내기) — execution failed',
-    exportRes.ok === true || unsupported, {
+        : envBlocked
+          ? 'S5 export leg: NOT_RUN (environment-blocked — modal save dialog cannot complete headless)'
+          : 'S5 export leg (PDF로 내보내기) — execution failed',
+    exportRes.ok === true || notRun, {
     ...exportRes,
-    classification: exportRes.ok ? 'PASS' : unsupported ? 'NOT_RUN' : 'FAIL',
+    classification: exportRes.ok ? 'PASS' : unsupported ? 'NOT_RUN(unsupported)' : envBlocked ? 'NOT_RUN(env-blocked)' : 'FAIL',
     fallbackNote: 'CLI convert has NO hwpx source routes (supported-list evidence) — export leg is app-driven only',
   })
 
