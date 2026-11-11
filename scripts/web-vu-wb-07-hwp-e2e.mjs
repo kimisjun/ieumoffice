@@ -184,7 +184,7 @@ try {
   let exportRes = { ok: false }
   try {
     const before = new Set(readdirSync('/tmp/web-e2e').filter((f) => f.endsWith('.pdf')))
-    await page.evaluate(() => {
+    const clicked = await page.evaluate(() => {
       const doc = document.querySelector('iframe').contentDocument
       const item = [...doc.querySelectorAll('.md-label')].find((e) => e.textContent.includes('PDF로 내보내기'))
       if (item) (item.closest('button, li, [role=menuitem], .menu-item') ?? item).dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -193,15 +193,21 @@ try {
     await page.waitForTimeout(8000)
     const after = readdirSync('/tmp/web-e2e').filter((f) => f.endsWith('.pdf'))
     const fresh = after.filter((f) => !before.has(f))
-    exportRes = { ok: fresh.length > 0, freshPdfs: fresh }
-  } catch (e) { exportRes = { ok: false, error: String(e).slice(0, 150) } }
+    exportRes = { ok: fresh.length > 0, clicked, freshPdfs: fresh }
+  } catch (e) { exportRes = { ok: false, clicked: false, error: String(e).slice(0, 150) } }
+  // QA 2차 P1-HWP-export: an unreachable menu item is NOT_RUN (unsupported);
+  // a clicked item that produces nothing is an execution FAILURE, not NOT_RUN
+  const unsupported = exportRes.ok === false && exportRes.clicked !== true
   noteStep(
     exportRes.ok
       ? 'S5 export leg (PDF로 내보내기, best-effort)'
-      : 'S5 export leg: NOT_RUN (optional leg — the best-effort export attempt did not complete)',
-    exportRes.ok === true, {
+      : unsupported
+        ? 'S5 export leg: NOT_RUN (menu item unreachable — no export feature to run)'
+        : 'S5 export leg (PDF로 내보내기) — execution failed',
+    exportRes.ok === true || unsupported, {
     ...exportRes,
-    fallbackNote: 'CLI convert has NO hwpx source routes (supported-list evidence) — export leg is app-driven only; recorded as NOT_RUN when no PDF appears',
+    classification: exportRes.ok ? 'PASS' : unsupported ? 'NOT_RUN' : 'FAIL',
+    fallbackNote: 'CLI convert has NO hwpx source routes (supported-list evidence) — export leg is app-driven only',
   })
 
   // S6: fresh-context reopen — content is canvas-rendered (vision adjudicated)

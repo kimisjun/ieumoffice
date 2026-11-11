@@ -60,13 +60,24 @@ async function main(): Promise<void> {
       .map((i) => (i as { href?: string }).href ?? '')
       .filter(Boolean)
     if (archive) {
-      // resolve spine hrefs against the archive (they are OPF-relative), and
-      // fall back to every xhtml document the engine's archive exposes
+      // resolve spine hrefs against the archive (they are OPF-relative)
       const names = Object.keys(archive.files).filter((n) => n.endsWith('.xhtml') || n.endsWith('.html'))
       const wanted = spineHrefs.length
-        ? names.filter((n) => spineHrefs.some((h) => n.endsWith(decodeURIComponent(h))))
+        ? names.filter((n) =>
+            spineHrefs.some((h) => n.endsWith(decodeURIComponent(h).replace(/^\.\//, ''))),
+          )
         : names
-      for (const name of (wanted.length ? wanted : names)) {
+      // QA 2차 P1-B: when the spine is known, ONLY spine documents count —
+      // falling back to every xhtml would make markers outside the reading
+      // order false-positive (the QA's negative control). An unresolved spine
+      // is an ERROR, never a wider scan.
+      if (spineHrefs.length && wanted.length === 0) {
+        console.log(
+          JSON.stringify({ status: 'error', error: 'spine hrefs resolved to no archive documents', spineHrefs }),
+        )
+        return
+      }
+      for (const name of wanted) {
         const entry = archive.file(name)
         if (entry) chapterTexts.push(await entry.async('string'))
       }
