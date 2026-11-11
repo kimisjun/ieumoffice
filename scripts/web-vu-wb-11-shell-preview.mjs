@@ -10,7 +10,8 @@
 // Run: WEB_TOKEN=... node scripts/web-vu-wb-11-shell-preview.mjs [baseURL]
 import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -121,6 +122,46 @@ try {
     await p.waitForTimeout(700)
   }
 
+  // QA 3차 P1-E: each tab saves to its OWN file and the sibling file stays
+  // byte-invariant — edit-mid-tab isolation is proven on disk, not just in
+  // the live DOM
+  const saveViaDialog = async (page, fileName) => {
+    await page.keyboard.press('Meta+s')
+    await page.waitForTimeout(1500)
+    const savedAt = await page.evaluate((fallbackName) => {
+      const host = document.getElementById('genoffice-web-dialog')
+      if (!host) return null
+      const crumbs = host.querySelector('[data-role=crumbs]')
+      const cwd = (crumbs?.textContent ?? '').trim().replace(/\/$/, '')
+      return cwd ? `${cwd}/${fallbackName}` : `/tmp/web-e2e/${fallbackName}`
+    }, fileName)
+    if (!savedAt) return null
+    await page.evaluate((name) => {
+      const host = document.getElementById('genoffice-web-dialog')
+      const nameInput = host.querySelector('[data-role=name]')
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+      setter.call(nameInput, name)
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }))
+    }, fileName)
+    await page.waitForTimeout(300)
+    await page.evaluate(() => {
+      document.getElementById('genoffice-web-dialog')?.querySelector('[data-role=ok]')?.click()
+    })
+    for (let i = 0; i < 30; i++) {
+      await new Promise((res) => setTimeout(res, 500))
+      if (existsSync(savedAt)) return savedAt
+    }
+    return null
+  }
+  const engineTitles = (file) => {
+    try {
+      const out = execFileSync('npx', ['tsx', 'scripts/engine-parse-vu.ts', 'xmind', file, 'MARK'], {
+        cwd: process.cwd(), encoding: 'utf8', timeout: 120000,
+      })
+      return JSON.parse(out.trim().split('\n').pop() ?? '{}')
+    } catch (e) { return { status: 'error', detail: String(e).slice(0, 150) } }
+  }
+
   // two more tabs of the SAME app (mindmap)
   const mmTabs = {}
   for (const [key, mark] of [['a', MARK_A], ['b', MARK_B]]) {
@@ -139,6 +180,30 @@ try {
     tb.some((t) => t.includes(MARK_B)) && !tb.some((t) => t.includes(MARK_A))
   noteStep('P4a same-app parallel tabs, per-tab edits stay isolated (machine echo)',
     isolated, { tabA: ta.slice(0, 4), tabB: tb.slice(0, 4), MARK_A, MARK_B })
+
+  // P4a2 (QA 3차 P1-E): each tab saves to its OWN file; the sibling file is
+  // byte-invariant across the other tab's later edit
+  const fileA = await saveViaDialog(mmTabs.a, 'p4a-tab-a.xmind')
+  const fileB = await saveViaDialog(mmTabs.b, 'p4a-tab-b.xmind')
+  const parsedA = fileA ? engineTitles(fileA) : { status: 'no-file' }
+  const parsedB = fileB ? engineTitles(fileB) : { status: 'no-file' }
+  const bHashBefore = fileB ? sha256(readFileSync(fileB)) : null
+  const MARK_A2 = mkMark('TAB-A2')
+  await addTopic(mmTabs.a, MARK_A2)
+  await saveViaDialog(mmTabs.a, 'p4a-tab-a.xmind')
+  const bHashAfter = fileB && existsSync(fileB) ? sha256(readFileSync(fileB)) : null
+  const titlesA = JSON.stringify(parsedA)
+  const titlesB = JSON.stringify(parsedB)
+  const filesOk =
+    Boolean(fileA && fileB) &&
+    titlesA.includes(MARK_A) && !titlesA.includes(MARK_B) &&
+    titlesB.includes(MARK_B) && !titlesB.includes(MARK_A) &&
+    bHashBefore !== null && bHashBefore === bHashAfter
+  noteStep('P4a2 two saved files, sibling file byte-invariant (P1-E)', filesOk, {
+    fileA, fileB, parsedA, parsedB,
+    siblingHashBefore: bHashBefore, siblingHashAfter: bHashAfter,
+    siblingUnchanged: bHashBefore !== null && bHashBefore === bHashAfter,
+  })
 
   // close tab A; tab B must remain fully usable (another edit lands)
   await mmTabs.a.close()

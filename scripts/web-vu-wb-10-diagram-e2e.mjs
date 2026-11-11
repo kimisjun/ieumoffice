@@ -16,7 +16,8 @@
 import { createRequire } from 'node:module'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, copyFileSync } from 'node:fs'
+import { inflateSync } from 'node:zlib'
 import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -62,6 +63,46 @@ function writeFixture() {
 }
 writeFixture()
 const inBytes = readFileSync(file)
+
+// QA 3차 P1-D: S5 checks the PDF's OWN content (inflating its streams) and
+// S6's restored-content proof is a hash-bound VISION leg on the pre-edit
+// screenshot — re-typing the same marker and re-saving cannot prove restore.
+function pdfTextProbe(pdfPath, needle, fixture) {
+  const bytes = readFileSync(pdfPath)
+  const chunks = []
+  const raw = bytes.toString('latin1')
+  let idx = 0
+  for (;;) {
+    const s = raw.indexOf('stream', idx)
+    if (s < 0) break
+    const e = raw.indexOf('endstream', s)
+    if (e < 0) break
+    const start = raw[raw[s - 1] === '\n' ? s + 6 : s + 7]
+    const body = bytes.subarray(s + 6, e)
+    try { chunks.push(inflateSync(body).toString('utf8')) } catch { /* not flate */ }
+    idx = e + 9
+  }
+  const text = chunks.join('\n')
+  return { marker: text.includes(needle), fixture: text.includes(fixture), inflatedStreams: chunks.length }
+}
+
+const visionAdjudications = (() => {
+  try { return JSON.parse(readFileSync('/tmp/web-e2e/vision-adjudication.json', 'utf8')) } catch { return {} }
+})()
+function visionLeg(step, machineOk, shotPath, expectations, detail = {}) {
+  const sha = sha256(readFileSync(shotPath))
+  const adj = visionAdjudications[sha]
+  if (!machineOk) { noteStep(step, false, { ...detail, vision: { sha256: sha, expectations } }); return }
+  if (adj && adj.verdict === 'ok') {
+    noteStep(step, true, { ...detail, vision: { sha256: sha, verdict: adj.verdict, reader: adj.reader ?? 'vision_analyze', expectations } })
+    return
+  }
+  noteStep(`${step}: PENDING_VISION`, false, {
+    ...detail,
+    vision: { sha256: sha, status: adj ? adj.verdict : 'PENDING_VISION', expectations,
+      note: 'automatic PASS withheld until an independent vision adjudication bound to this screenshot hash exists' },
+  })
+}
 
 async function editorFrame(page) {
   for (let i = 0; i < 40; i++) {
@@ -200,9 +241,12 @@ try {
     cli(['convert', file, '--to', 'svg', '--page', 'Page-1', '--out', svg, '--force'])
     const pdfBytes = readFileSync(pdf)
     const svgText = readFileSync(svg, 'utf8')
+    const pdfContent = pdfTextProbe(pdf, MARK, 'VU-WB-10')
     s5 = {
-      ok: pdfBytes.length > 400 && svgText.includes(MARK) && svgText.includes('VU-WB-10'),
+      ok: pdfBytes.length > 400 && svgText.includes(MARK) && svgText.includes('VU-WB-10')
+        && pdfContent.marker && pdfContent.fixture,
       pdf: { size: pdfBytes.length, sha256: sha256(pdfBytes) },
+      pdfContent,
       svgContent: { marker: svgText.includes(MARK), fixture: svgText.includes('VU-WB-10') },
     }
   } catch (e) { s5 = { ok: false, error: String(e).slice(0, 250) } }
@@ -218,9 +262,17 @@ try {
   await page2.waitForSelector('#root', { timeout: 60000 })
   await editorFrame(page2)
   await page2.screenshot({ path: join(shotDir, 's6-reopen.png') })
+  // QA 3차 P1-D: the PRE-EDIT screenshot proves the fresh context restored the
+  // edited content BEFORE any typing — typing the same marker again cannot
+  // prove restoration. The hash-bound vision leg withholds PASS until an
+  // independent reading confirms it.
+  visionLeg('S6 fresh-context reopen (pre-edit content restored; vision-verified)',
+    true, join(shotDir, 's6-reopen.png'),
+    'the reopened diagram shows the VU-WB-10 fixture text AND the DGM-SLICE marker in the shape, BEFORE any new typing',
+    { fixtureKept: readFileSync(file, 'utf8').includes('VU-WB-10') })
   await typeIntoCell(page2, `${FIXTURE} ${MARK}`)
   const resaveXml = await saveWithCtrlS(page2)
-  noteStep('S6 fresh-context reopen (app parse→serialize keeps the marker)',
+  noteStep('S6b re-save after edit (app parse→serialize keeps content)',
     !!(resaveXml && resaveXml.includes(MARK) && resaveXml.includes('VU-WB-10')), {
       reSaved: resaveXml !== null,
     })

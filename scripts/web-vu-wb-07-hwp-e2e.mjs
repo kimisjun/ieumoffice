@@ -182,12 +182,13 @@ try {
 
   // S5: export attempt — the studio's PDF로 내보내기 (best-effort leg)
   let exportRes = { ok: false }
+  let clicked = false
   try {
     const before = new Set([
       ...readdirSync('/tmp/web-e2e').filter((f) => f.endsWith('.pdf')).map((f) => `/tmp/web-e2e/${f}`),
       ...(() => { try { return readdirSync(`${process.env.HOME}/Downloads`).filter((f) => f.endsWith('.pdf')).map((f) => `${process.env.HOME}/Downloads/${f}`) } catch { return [] } })(),
     ])
-    const clicked = await page.evaluate(() => {
+    clicked = await page.evaluate(() => {
       const doc = document.querySelector('iframe').contentDocument
       const item = [...doc.querySelectorAll('.md-label')].find((e) => e.textContent.includes('PDF로 내보내기'))
       if (item) (item.closest('button, li, [role=menuitem], .menu-item') ?? item).dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -203,11 +204,10 @@ try {
       for (const doc of docs) {
         const input = doc.querySelector('[data-role="name"]')
         if (!input) continue
-        const setter = Object.getOwnPropertyDescriptor(
-          (doc.defaultView ?? window).HTMLInputElement.prototype, 'value')?.set
+        const view = doc.defaultView ?? window
+        const setter = Object.getOwnPropertyDescriptor(view.HTMLInputElement.prototype, 'value')?.set
         setter?.call(input, outName)
-        input.dispatchEvent(new (doc.defaultView ?? window)('input', { bubbles: true }) instanceof Event
-          ? new Event('input', { bubbles: true }) : new Event('input', { bubbles: true }))
+        input.dispatchEvent(new view.Event('input', { bubbles: true }))
         const ok = doc.querySelector('[data-role="ok"]')
         if (ok) ok.click()
         return true
@@ -225,7 +225,11 @@ try {
       } catch { /* dir may not exist */ }
     }
     exportRes = { ok: fresh.length > 0, clicked, dialogHandled, freshPdfs: fresh }
-  } catch (e) { exportRes = { ok: false, clicked: false, dialogHandled: false, error: String(e).slice(0, 150) } }
+  } catch (e) {
+    // clicked is captured BEFORE the risky steps: an exception after the
+    // click must not reclassify the leg as 'menu unreachable' (QA 3차 §5.4)
+    exportRes = { ok: false, clicked: clicked === true, dialogHandled: false, error: String(e).slice(0, 150) }
+  }
   // QA 2차 P1-HWP-export: classification is honest —
   //   unreachable menu item            → NOT_RUN (unsupported)
   //   clicked but nothing happened     → FAIL (execution failure)
@@ -284,11 +288,13 @@ const summary = {
   mark: MARK,
   results,
   // QA 1차 P1-C: boot retries and the save path that worked are findings,
-  // recorded per run — the original editor's boot race stays a product note
+  // recorded per run — the original editor's boot race stays a product note.
+  // Collected FROM THE RESULTS (block-scoped locals are unreachable here and
+  // silently read as null — QA 3차 §5.2).
   productFindings: {
-    boot: typeof boot !== 'undefined' ? { reloads: boot.attempt, firstBootOk: boot.attempt === 0 } : null,
-    reopenBoot: typeof boot6 !== 'undefined' ? { reloads: boot6.attempt, firstBootOk: boot6.attempt === 0 } : null,
-    savePath: typeof savePath !== 'undefined' ? savePath : null,
+    boot: results.find((r) => r.step.startsWith('S1'))?.detail?.boot ?? null,
+    reopenBoot: results.find((r) => r.step.startsWith('S6'))?.detail?.boot ?? null,
+    savePath: results.find((r) => r.step.startsWith('S4'))?.detail?.savePath ?? null,
     note: 'the original rhwp-studio boot race (blank studio on first load) is a P1 product finding; retries are counted here, not hidden',
   },
   counts,
