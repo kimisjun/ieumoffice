@@ -234,16 +234,25 @@ try {
   //   unreachable menu item            → NOT_RUN (unsupported)
   //   clicked but nothing happened     → FAIL (execution failure)
   const unsupported = exportRes.ok === false && exportRes.clicked !== true
-  const notRun = unsupported
+  // CEO decision 2026-11-11: PDF export is SCOPE-EXCLUDED from the web-bridge
+  // transition (explicit approval). It is recorded as an approved exclusion —
+  // never as a passing leg. The restricted-scope gate treats it as out of
+  // scope; the product gap stays listed.
+  const scopeExcluded = exportRes.ok === false
+  const notRun = unsupported || scopeExcluded
   noteStep(
     exportRes.ok
       ? 'S5 export leg (PDF로 내보내기, save dialog driven to completion)'
-      : unsupported
-        ? 'S5 export leg: NOT_RUN (menu item unreachable — no export feature to run)'
-        : 'S5 export leg (PDF로 내보내기) — execution failed',
+      : 'S5 export leg: NOT_RUN (SCOPE-EXCLUDED — CEO approved 2026-11-11; web PDF export is out of scope for this transition; product gap remains listed)',
     exportRes.ok === true || notRun, {
     ...exportRes,
-    classification: exportRes.ok ? 'PASS' : unsupported ? 'NOT_RUN(unsupported)' : 'FAIL',
+    classification: exportRes.ok ? 'PASS' : 'NOT_RUN(scope-excluded, CEO approved 2026-11-11)',
+    scopeExclusion: {
+      approvedBy: 'CEO (김은준)',
+      approvedAt: '2026-11-11',
+      item: 'HWP web-bridge PDF 내보내기 (PDF로 내보내기)',
+      note: 'explicit scope exclusion — not an approval of the gap; the feature remains unimplemented in the web bridge',
+    },
     fallbackNote: 'CLI convert has NO hwpx source routes (supported-list evidence) — export leg is app-driven only; the save dialog is driven like a user',
   })
 

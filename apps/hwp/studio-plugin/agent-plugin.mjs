@@ -6826,6 +6826,38 @@ export const agentPlugin = {
           }
         }
         if (!host.automation.registerCommand || !host.automation.addMenuItem) return { ok: false }
+        // The File menu advertises Ctrl+S as a shortcut LABEL, but the
+        // embedded editor never routes the keystroke to the command. Wire the
+        // real keypress to the same FILE_COMMAND_EVENT the menu item fires,
+        // so the USER's ⌘S/Ctrl+S saves through the identical contract
+        // (QA 6차 P1: user-key save path, not just the internal event).
+        if (!globalThis.__ieumFileShortcutInstalled) {
+          globalThis.__ieumFileShortcutInstalled = true
+          // The plugin may run in a nested editor frame while the app's
+          // file-command listener sits on the studio window — listen and fire
+          // on EVERY same-origin window in the parent chain (cross-origin
+          // access throws and stops the walk).
+          const windows = []
+          let w = globalThis
+          for (let i = 0; i < 5 && w; i++) {
+            windows.push(w)
+            try { w = w.parent === w ? null : w.parent } catch { break }
+          }
+          const fire = (e) => {
+            if (
+              (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey &&
+              String(e.key).toLowerCase() === 's'
+            ) {
+              e.preventDefault()
+              for (const win of windows) {
+                try { win.dispatchEvent?.(new CustomEvent(FILE_COMMAND_EVENT, { detail: 'save' })) } catch { /* dead */ }
+              }
+            }
+          }
+          for (const win of windows) {
+            try { win.addEventListener?.('keydown', fire, true) } catch { /* dead */ }
+          }
+        }
         for (const item of FILE_MENU) {
           try {
             host.automation.registerCommand({
