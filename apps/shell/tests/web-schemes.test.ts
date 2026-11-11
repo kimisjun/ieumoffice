@@ -108,6 +108,19 @@ describe('web bridge scheme rewriting — contract fields only (QA 3차 P0-A)', 
     expect(rewriteIn('docs', req)).toEqual({ type: 'html', content: '<img src="genoffice-docx-media://example/doc">' })
   })
 
+  it('QA 5차: original sentinel-lookalike text survives byte-identically', () => {
+    const weird = '<p>A\uE0000\uE001B</p>'
+    const req = { type: 'html', content: weird }
+    expect(rewriteIn('docs', req)).toEqual(req)
+    expect(rewriteOut('docs', req)).toEqual(req)
+  })
+
+  it('QA 5차: rewrite still applies next to sentinel-lookalike text', () => {
+    const req = { type: 'html', content: '<p>A\uE0000\uE001B</p><img src="/__media://x">' }
+    const out = rewriteIn('docs', req) as typeof req
+    expect(out.content).toBe('<p>A\uE0000\uE001B</p><img src="genoffice-docx-media://x">')
+  })
+
   it('round-trips mixed documents byte-identically in body text', () => {
     const mixed = {
       text: '# Doc\nLiteral /__mdasset://example/doc and md-asset://example/doc.\n```\n<img src="/__mdasset://c">\n```',

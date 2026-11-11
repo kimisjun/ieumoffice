@@ -60,32 +60,52 @@ function rewriteMarkupAttributes(
   markup: string,
   convert: (s: string) => string,
 ): string {
-  const store: string[] = []
-  const hide = (s: string): string => {
-    store.push(s)
-    return `${HIDE_OPEN}${store.length - 1}${HIDE_CLOSE}`
+  // SEGMENT SURGERY, no placeholder tokens at all (QA 5차: any fixed token —
+  // NUL-digit or sentinel — can collide with real body text and delete it).
+  // Protected ranges are computed first; everything is assembled from slices
+  // of the original, so untouched bytes are preserved BY CONSTRUCTION.
+  const protectedRanges: Array<[number, number]> = []
+  const protectRe = new RegExp(
+    `<!--[\\s\\S]*?-->|<(?:${RAW_TEXT_ELEMENTS})\\b[^>]*>[\\s\\S]*?<\\/(?:${RAW_TEXT_ELEMENTS})\\s*>`,
+    'gi',
+  )
+  for (const m of markup.matchAll(protectRe)) {
+    protectedRanges.push([m.index ?? 0, (m.index ?? 0) + m[0].length])
   }
-  let out = markup.replace(
-    new RegExp(
-      `<!--[\\s\\S]*?-->|<(?:${RAW_TEXT_ELEMENTS})\\b[^>]*>[\\s\\S]*?<\\/(?:${RAW_TEXT_ELEMENTS})\\s*>`,
-      'gi',
-    ),
-    hide,
-  )
-  out = out.replace(/<[a-zA-Z][^<>]*(?:"[^"]*"[^<>]*|'[^']*'[^<>]*)*>/g, (tag) =>
-    tag.replace(
-      /(\s)([a-zA-Z_:][\w:.-]*)(\s*=\s*)("[^"]*"|'[^']*')/g,
-      (m: string, sp: string, name: string, eq: string, val: string) => {
-        if (!URL_ATTR_NAMES.has(name.toLowerCase())) return m
+  const inProtected = (i: number): boolean =>
+    protectedRanges.some(([s, e]) => i >= s && i < e)
+
+  const attrRe = /(\s)([a-zA-Z_:][\w:.-]*)(\s*=\s*)("[^"]*"|'[^']*')/g
+  const tagRe = /<[a-zA-Z][^<>]*(?:"[^"]*"[^<>]*|'[^']*'[^<>]*)*>/g
+  const out: string[] = []
+  let last = 0
+  for (const m of markup.matchAll(tagRe)) {
+    const start = m.index ?? 0
+    const end = start + m[0].length
+    if (inProtected(start)) continue
+    out.push(markup.slice(last, start))
+    const tag = m[0]
+    const rebuilt: string[] = []
+    let tlast = 0
+    for (const a of tag.matchAll(attrRe)) {
+      const as = a.index ?? 0
+      const ae = as + a[0].length
+      rebuilt.push(tag.slice(tlast, as))
+      if (URL_ATTR_NAMES.has((a[2] ?? '').toLowerCase())) {
+        const val = a[4] ?? ''
         const q = val[0]
-        return `${sp}${name}${eq}${q}${convert(val.slice(1, -1))}${q}`
-      },
-    ),
-  )
-  return out.replace(
-    new RegExp(`${HIDE_OPEN}(\\d+)${HIDE_CLOSE}`, 'g'),
-    (_m, i: string) => store[Number(i)] ?? '',
-  )
+        rebuilt.push(`${a[1] ?? ''}${a[2] ?? ''}${a[3] ?? ''}${q}${convert(val.slice(1, -1))}${q}`)
+      } else {
+        rebuilt.push(a[0])
+      }
+      tlast = ae
+    }
+    rebuilt.push(tag.slice(tlast))
+    out.push(rebuilt.join(''))
+    last = end
+  }
+  out.push(markup.slice(last))
+  return out.join('')
 }
 
 type Convert = (s: string) => string
