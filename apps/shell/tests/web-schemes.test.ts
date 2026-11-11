@@ -85,6 +85,29 @@ describe('web bridge scheme rewriting — contract fields only (QA 3차 P0-A)', 
     expect(rewriteIn('markdown', desk)).toEqual(desk)
   })
 
+
+  it('QA 4차 case 1: createDocument md content (code block) is byte-preserved', () => {
+    const req = { type: 'md', title: 'T', content: '```html\n<img src="/__media://example/doc">\n```\n' }
+    expect(rewriteIn('docs', req)).toEqual(req)
+    const reqDesk = { type: 'md', title: 'T', content: '```html\n<img src="genoffice-docx-media://example/doc">\n```\n' }
+    expect(rewriteOut('docs', reqDesk)).toEqual(reqDesk)
+  })
+
+  it('QA 4차 case 2: a src= literal INSIDE another attribute value is byte-preserved', () => {
+    const req = { type: 'html', content: '<div title=\'Code example: src="/__media://example/doc"\'>text</div>' }
+    expect(rewriteIn('docs', req)).toEqual(req)
+  })
+
+  it('QA 4차 case 3: textarea raw-text content is byte-preserved', () => {
+    const req = { type: 'html', content: '<textarea><img src="/__media://example/doc"></textarea>' }
+    expect(rewriteIn('docs', req)).toEqual(req)
+  })
+
+  it('QA 4차: real HTML attributes still convert in createDocument html content', () => {
+    const req = { type: 'html', content: '<img src="/__media://example/doc">' }
+    expect(rewriteIn('docs', req)).toEqual({ type: 'html', content: '<img src="genoffice-docx-media://example/doc">' })
+  })
+
   it('round-trips mixed documents byte-identically in body text', () => {
     const mixed = {
       text: '# Doc\nLiteral /__mdasset://example/doc and md-asset://example/doc.\n```\n<img src="/__mdasset://c">\n```',

@@ -35,15 +35,26 @@ const URL_FIELDS = new Set([
 ])
 const URL_ARRAY_FIELDS = new Set(['imageSources', 'media', 'assets'])
 /** markup-typed contract fields: only ATTRIBUTE VALUES inside real tags change */
-const MARKUP_FIELDS = new Set(['html', 'content', 'markup', 'svg'])
-const URL_ATTRS = 'src|href|poster|action|formaction|data-src|data-href|xlink:href'
+const MARKUP_FIELDS = new Set(['html', 'markup', 'svg'])
+/** URL attribute NAMES (case-insensitive) — the attribute name, not a string
+ *  match inside some other attribute's value (QA 4차 §2.2 case 2) */
+const URL_ATTR_NAMES = new Set([
+  'src', 'href', 'poster', 'action', 'formaction', 'data-src', 'data-href', 'xlink:href',
+])
+/** RAW-TEXT elements whose content is text, not markup (QA 4차 §2.2 case 3) */
+const RAW_TEXT_ELEMENTS = 'script|style|textarea|title|noscript|xmp'
+/** placeholders use private-use sentinels — an original NUL-digit-NUL string
+ *  must never collide with the restore pattern (QA 4차 contract-edge) */
+const HIDE_OPEN = '\uE000'
+const HIDE_CLOSE = '\uE001'
 
 /**
- * Surgical attribute rewriting for markup fields: only the values of URL
- * attributes inside REAL start tags change. Comments and script/style bodies
- * are hidden first; text nodes never sit inside a tag span, so prose that
- * merely contains `src="…"` and code examples round-trip byte-identically
- * (QA 3차 P0-A cases 3-4).
+ * Surgical attribute rewriting for markup fields: only the value of an
+ * attribute whose NAME is a URL attribute changes, and only inside REAL start
+ * tags. Comments and RAW-TEXT bodies (script/style/textarea/title/noscript/xmp)
+ * are hidden first; text nodes never sit inside a tag span; a `src="…"`
+ * INSIDE another attribute's value (e.g. a title attribute) is never touched
+ * (QA 4차 §2.2 cases 2-3).
  */
 function rewriteMarkupAttributes(
   markup: string,
@@ -52,48 +63,77 @@ function rewriteMarkupAttributes(
   const store: string[] = []
   const hide = (s: string): string => {
     store.push(s)
-    return `\u0000${store.length - 1}\u0000`
+    return `${HIDE_OPEN}${store.length - 1}${HIDE_CLOSE}`
   }
   let out = markup.replace(
-    /<!--[\s\S]*?-->|<script\b[^>]*>[\s\S]*?<\/script\s*>|<style\b[^>]*>[\s\S]*?<\/style\s*>/gi,
+    new RegExp(
+      `<!--[\\s\\S]*?-->|<(?:${RAW_TEXT_ELEMENTS})\\b[^>]*>[\\s\\S]*?<\\/(?:${RAW_TEXT_ELEMENTS})\\s*>`,
+      'gi',
+    ),
     hide,
   )
   out = out.replace(/<[a-zA-Z][^<>]*(?:"[^"]*"[^<>]*|'[^']*'[^<>]*)*>/g, (tag) =>
     tag.replace(
-      new RegExp(`(\\s(?:${URL_ATTRS})\\s*=\\s*)(["'])([^"']*)\\2`, 'gi'),
-      (_m, pre: string, q: string, val: string) => `${pre}${q}${convert(val)}${q}`,
+      /(\s)([a-zA-Z_:][\w:.-]*)(\s*=\s*)("[^"]*"|'[^']*')/g,
+      (m: string, sp: string, name: string, eq: string, val: string) => {
+        if (!URL_ATTR_NAMES.has(name.toLowerCase())) return m
+        const q = val[0]
+        return `${sp}${name}${eq}${q}${convert(val.slice(1, -1))}${q}`
+      },
     ),
   )
-  return out.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => store[Number(i)] ?? '')
+  return out.replace(
+    new RegExp(`${HIDE_OPEN}(\\d+)${HIDE_CLOSE}`, 'g'),
+    (_m, i: string) => store[Number(i)] ?? '',
+  )
 }
 
 type Convert = (s: string) => string
 
 /**
+ * `content` semantics follow the REQUEST TYPE discriminator — the same key is
+ * Markdown source for type:'md' and markup for type:'html'
+ * (CreateDocumentRequest.content, QA 4차 §2.2 case 1). Without a 'html'
+ * discriminator the field is BODY and never touched: conservative default.
+ */
+function contentKind(parent: Record<string, unknown> | null): 'markup' | 'body' {
+  const t = parent?.type
+  return t === 'html' ? 'markup' : 'body'
+}
+
+/**
  * Contract-router: recurse through the payload and rewrite ONLY
  * URL-typed fields (whole values), URL array items, and markup attribute
- * values. `text` and every unknown field are NEVER touched. Typed arrays
- * (decoded binaries) and classed instances pass through untouched —
- * index-key reconstruction would turn a Uint8Array into {0:1, 1:2, …}.
+ * values. Body fields (`text`, `title`, markdown `content`, …) and every
+ * unknown field are NEVER touched. Typed arrays (decoded binaries) and classed
+ * instances pass through untouched — index-key reconstruction would turn a
+ * Uint8Array into {0:1, 1:2, …}.
  */
-function routeContract(value: unknown, key: string | null, convert: Convert): unknown {
+function routeContract(
+  value: unknown,
+  key: string | null,
+  convert: Convert,
+  parent: Record<string, unknown> | null = null,
+): unknown {
   if (typeof value === 'string') {
+    if (key === 'content' && contentKind(parent) === 'markup') return rewriteMarkupAttributes(value, convert)
     if (key !== null && MARKUP_FIELDS.has(key)) return rewriteMarkupAttributes(value, convert)
     if (key !== null && URL_FIELDS.has(key)) return convert(value)
     return value // body/unknown fields: byte-preserved
   }
   if (Array.isArray(value)) {
     if (URL_ARRAY_FIELDS.has(key ?? '')) {
-      return value.map((x) => (typeof x === 'string' ? convert(x) : routeContract(x, null, convert)))
+      return value.map((x) => (typeof x === 'string' ? convert(x) : routeContract(x, null, convert, parent)))
     }
-    return value.map((x) => routeContract(x, key, convert))
+    return value.map((x) => routeContract(x, key, convert, parent))
   }
   if (value !== null && typeof value === 'object') {
     const proto = Object.getPrototypeOf(value)
     if (proto !== Object.prototype && proto !== null) return value
+    const obj = value as Record<string, unknown>
     const out: Record<string, unknown> = {}
-    for (const [k, entry] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = routeContract(entry, k, convert)
+    for (const [k, entry] of Object.entries(obj)) {
+      out[k] = routeContract(entry, k, convert, obj)
     }
     return out
   }
