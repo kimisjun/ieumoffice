@@ -42,7 +42,7 @@ const runs = [
   'vu-wb-04-slides-e2e', 'vu-wb-04-slides-e2e-resolved',
   'vu-wb-05-html-e2e', 'vu-wb-06-pdf-e2e',
   'vu-wb-07-hwp-e2e', 'vu-wb-08-mm-e2e', 'vu-wb-09-epub-e2e',
-  'vu-wb-10-diagram-e2e', 'vu-wb-11-shell-preview',
+  'vu-wb-10-diagram-e2e', 'vu-wb-11-shell-preview', 'vu-wb-11-shell-preview-e2e',
 ]
 const results = {}
 for (const name of runs) {

@@ -183,45 +183,64 @@ try {
   // S5: export attempt — the studio's PDF로 내보내기 (best-effort leg)
   let exportRes = { ok: false }
   try {
-    const before = new Set(readdirSync('/tmp/web-e2e').filter((f) => f.endsWith('.pdf')))
+    const before = new Set([
+      ...readdirSync('/tmp/web-e2e').filter((f) => f.endsWith('.pdf')).map((f) => `/tmp/web-e2e/${f}`),
+      ...(() => { try { return readdirSync(`${process.env.HOME}/Downloads`).filter((f) => f.endsWith('.pdf')).map((f) => `${process.env.HOME}/Downloads/${f}`) } catch { return [] } })(),
+    ])
     const clicked = await page.evaluate(() => {
       const doc = document.querySelector('iframe').contentDocument
       const item = [...doc.querySelectorAll('.md-label')].find((e) => e.textContent.includes('PDF로 내보내기'))
       if (item) (item.closest('button, li, [role=menuitem], .menu-item') ?? item).dispatchEvent(new MouseEvent('click', { bubbles: true }))
       return !!item
     })
-    await page.waitForTimeout(8000)
-    const after = readdirSync('/tmp/web-e2e').filter((f) => f.endsWith('.pdf'))
-    const fresh = after.filter((f) => !before.has(f))
-    // the export is dialog-driven: a modal save dialog cannot complete headless
-    const dialogOpen = await page.evaluate(() => {
-      const host = document.getElementById('genoffice-web-dialog')
-      const open = !!host && host.childElementCount > 0
-      if (open) host.replaceChildren()
-      return open
-    })
-    exportRes = { ok: fresh.length > 0, clicked, dialogOpen, freshPdfs: fresh }
-  } catch (e) { exportRes = { ok: false, clicked: false, dialogOpen: false, error: String(e).slice(0, 150) } }
+    // the export is dialog-driven: drive the save dialog like a user would —
+    // it may render in the parent document or inside the studio iframe
+    await page.waitForTimeout(1200)
+    const dialogHandled = await page.evaluate(async (outName) => {
+      const docs = [document]
+      const frame = document.querySelector('iframe')
+      try { if (frame?.contentDocument) docs.push(frame.contentDocument) } catch { /* cross-origin */ }
+      for (const doc of docs) {
+        const input = doc.querySelector('[data-role="name"]')
+        if (!input) continue
+        const setter = Object.getOwnPropertyDescriptor(
+          (doc.defaultView ?? window).HTMLInputElement.prototype, 'value')?.set
+        setter?.call(input, outName)
+        input.dispatchEvent(new (doc.defaultView ?? window)('input', { bubbles: true }) instanceof Event
+          ? new Event('input', { bubbles: true }) : new Event('input', { bubbles: true }))
+        const ok = doc.querySelector('[data-role="ok"]')
+        if (ok) ok.click()
+        return true
+      }
+      return false
+    }, 'vu-wb-07-export.pdf')
+    await page.waitForTimeout(6000)
+    const scanDirs = ['/tmp/web-e2e', `${process.env.HOME}/Downloads`]
+    const fresh = []
+    for (const dir of scanDirs) {
+      try {
+        for (const f of readdirSync(dir)) {
+          if (f.endsWith('.pdf') && !before.has(`${dir}/${f}`)) fresh.push(`${dir}/${f}`)
+        }
+      } catch { /* dir may not exist */ }
+    }
+    exportRes = { ok: fresh.length > 0, clicked, dialogHandled, freshPdfs: fresh }
+  } catch (e) { exportRes = { ok: false, clicked: false, dialogHandled: false, error: String(e).slice(0, 150) } }
   // QA 2차 P1-HWP-export: classification is honest —
   //   unreachable menu item            → NOT_RUN (unsupported)
-  //   modal save dialog opened         → NOT_RUN (environment-blocked: a modal
-  //                                      dialog cannot complete headless)
-  //   clicked, no dialog, no output    → FAIL (execution failure)
+  //   clicked but nothing happened     → FAIL (execution failure)
   const unsupported = exportRes.ok === false && exportRes.clicked !== true
-  const envBlocked = exportRes.ok === false && !unsupported && exportRes.dialogOpen === true
-  const notRun = unsupported || envBlocked
+  const notRun = unsupported
   noteStep(
     exportRes.ok
-      ? 'S5 export leg (PDF로 내보내기, best-effort)'
+      ? 'S5 export leg (PDF로 내보내기, save dialog driven to completion)'
       : unsupported
         ? 'S5 export leg: NOT_RUN (menu item unreachable — no export feature to run)'
-        : envBlocked
-          ? 'S5 export leg: NOT_RUN (environment-blocked — modal save dialog cannot complete headless)'
-          : 'S5 export leg (PDF로 내보내기) — execution failed',
+        : 'S5 export leg (PDF로 내보내기) — execution failed',
     exportRes.ok === true || notRun, {
     ...exportRes,
-    classification: exportRes.ok ? 'PASS' : unsupported ? 'NOT_RUN(unsupported)' : envBlocked ? 'NOT_RUN(env-blocked)' : 'FAIL',
-    fallbackNote: 'CLI convert has NO hwpx source routes (supported-list evidence) — export leg is app-driven only',
+    classification: exportRes.ok ? 'PASS' : unsupported ? 'NOT_RUN(unsupported)' : 'FAIL',
+    fallbackNote: 'CLI convert has NO hwpx source routes (supported-list evidence) — export leg is app-driven only; the save dialog is driven like a user',
   })
 
   // S6: fresh-context reopen — content is canvas-rendered (vision adjudicated)
