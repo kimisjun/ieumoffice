@@ -1,30 +1,65 @@
 import { describe, expect, it } from 'vitest'
 import { rewriteIn, rewriteOut } from '../src/web/schemes'
 
-describe('web bridge scheme rewriting', () => {
-  it('rewrites scheme literals to same-origin paths for docs payloads', () => {
-    const reply = {
-      dataUrl: 'genoffice-docx-media://handoff/abc-uuid',
-      nested: { list: ['genoffice-docx-media://hash/media/image1.png'] },
-    }
-    expect(rewriteOut('docs', reply)).toEqual({
-      dataUrl: '/__media://handoff/abc-uuid',
-      nested: { list: ['/__media://hash/media/image1.png'] },
-    })
+describe('web bridge scheme rewriting — contract fields only (QA 3차 P0-A)', () => {
+  it('case 1: a body that IS a lone URL is byte-preserved', () => {
+    const saved = { text: '/__mdasset://example/doc', imageSources: [] as string[], mode: 'save' }
+    expect(rewriteIn('markdown', saved)).toEqual(saved)
+    const desk = { text: 'md-asset://example/doc', imageSources: [] as string[], mode: 'save' }
+    expect(rewriteOut('markdown', desk)).toEqual(desk)
   })
 
-  it('maps paths back to scheme literals on the way in', () => {
+  it('case 2: prose containing a src="…" literal is byte-preserved', () => {
+    const saved = { text: 'Code example: src="/__mdasset://example/doc"', mode: 'save' }
+    expect(rewriteIn('markdown', saved)).toEqual(saved)
+    const desk = { text: 'Code example: src="md-asset://example/doc"', mode: 'save' }
+    expect(rewriteOut('markdown', desk)).toEqual(desk)
+  })
+
+  it('case 3: a fenced HTML code block is byte-preserved', () => {
+    const saved = { text: '```html\n<img src="/__mdasset://example/doc">\n```', mode: 'save' }
+    expect(rewriteIn('markdown', saved)).toEqual(saved)
+  })
+
+  it('case 4: an HTML TEXT NODE src="…" is byte-preserved', () => {
+    const saved = { html: '<p>The example is src="/__htmlasset://example/doc" in prose.</p>' }
+    expect(rewriteIn('html', saved)).toEqual(saved)
+    const desk = { html: '<p>The example is src="html-asset://example/doc" in prose.</p>' }
+    expect(rewriteOut('html', desk)).toEqual(desk)
+  })
+
+  it('real attributes in markup still convert (both directions)', () => {
+    const saved = { html: '<img src="/__htmlasset://example/doc">' }
+    expect(rewriteIn('html', saved)).toEqual({ html: '<img src="html-asset://example/doc">' })
+    const desk = { html: '<a href="html-preview://v/1">x</a>' }
+    expect(rewriteOut('html', desk)).toEqual({ html: '<a href="/__preview://v/1">x</a>' })
+  })
+
+  it('comments and script/style bodies are protected', () => {
+    const saved = {
+      html: '<!-- <img src="/__htmlasset://c"> --><script>var u = "/__htmlasset://s"</script><img src="/__htmlasset://r">',
+    }
+    const out = rewriteIn('html', saved) as typeof saved
+    expect(out.html).toBe('<!-- <img src="/__htmlasset://c"> --><script>var u = "/__htmlasset://s"</script><img src="html-asset://r">')
+  })
+
+  it('URL fields and imageSources convert (contract shapes)', () => {
     expect(rewriteIn('markdown', { src: '/__mdasset:///notes/pic.png' })).toEqual({
       src: 'md-asset:///notes/pic.png',
     })
+    const saved = { imageSources: ['/__mdasset://h/p.png', '/__mdasset://h/q.png'] }
+    expect(rewriteIn('markdown', saved)).toEqual({
+      imageSources: ['md-asset://h/p.png', 'md-asset://h/q.png'],
+    })
+    expect(rewriteOut('docs', { dataUrl: 'genoffice-docx-media://handoff/abc-uuid' })).toEqual({
+      dataUrl: '/__media://handoff/abc-uuid',
+    })
   })
 
-  it('rewrites every html scheme in one payload', () => {
-    const out = rewriteOut('html', {
-      frame: 'html-preview://view-9/',
-      img: 'html-asset://local/notes/a/',
-    })
-    expect(out).toEqual({ frame: '/__preview://view-9/', img: '/__htmlasset://local/notes/a/' })
+  it('unknown fields are never touched', () => {
+    const value = { note: 'text with bare md-asset and /__mdasset words', custom: 'md-asset://x' }
+    expect(rewriteOut('markdown', value)).toEqual(value)
+    expect(rewriteIn('markdown', value)).toEqual(value)
   })
 
   it('leaves other apps untouched', () => {
@@ -33,83 +68,33 @@ describe('web bridge scheme rewriting', () => {
   })
 
   it('passes typed arrays through the rewrite unharmed', () => {
-    // document bytes ride next to strings in the same payload; index-key
-    // reconstruction would turn them into {0:1, 1:2, …} and handlers'
-    // Buffer.from(data) would throw
     const bytes = new Uint8Array([1, 2, 3])
-    const out = rewriteIn('docs', { data: bytes, url: '/__media://h/p' }) as {
+    const out = rewriteIn('docs', { data: bytes, src: '/__media://h/p' }) as {
       data: Uint8Array
-      url: string
+      src: string
     }
-    expect(out.data).toBe(bytes)
-    expect(out.url).toBe('genoffice-docx-media://h/p')
-  })
-
-  it('keeps classed instances (Date) intact', () => {
-    const date = new Date(0)
-    const out = rewriteOut('docs', { when: date })
-    expect((out as { when: Date }).when).toBe(date)
-  })
-
-  // QA 1차 P0-A: rewriting must be scoped to the URL form — document text
-  // carrying bare scheme names or web prefixes round-trips byte-identically
-  it('leaves document text with bare scheme names untouched (lossless round-trip)', () => {
-    const body = 'Literal /__mdasset and md-asset. Also __media and genoffice-docx-media.'
-    expect(rewriteOut('markdown', body)).toBe(body)
-    expect(rewriteIn('markdown', body)).toBe(body)
-    expect(rewriteIn('markdown', rewriteOut('markdown', body))).toBe(body)
-    expect(rewriteOut('docs', body)).toBe(body)
-  })
-
-  it('still rewrites URL fields inside a mixed payload', () => {
-    const mixed = {
-      note: 'text with bare md-asset and /__mdasset words',
-      src: 'md-asset://h/p.png',
-    }
-    const out = rewriteOut('markdown', mixed) as typeof mixed
-    expect(out.note).toBe('text with bare md-asset and /__mdasset words')
-    expect(out.src).toBe('/__mdasset://h/p.png')
+    expect(out.data).toBeInstanceOf(Uint8Array)
+    expect(Array.from(out.data)).toEqual([1, 2, 3])
+    expect(out.src).toBe('genoffice-docx-media://h/p')
   })
 
   it('does not double-rewrite already-rewritten literals', () => {
     const web = { src: '/__mdasset://h/p' }
-    expect(rewriteOut('markdown', web)).toEqual(web) // already web form
+    expect(rewriteOut('markdown', web)).toEqual(web)
     const desk = { src: 'md-asset://h/p' }
-    expect(rewriteIn('markdown', desk)).toEqual(desk) // already scheme form
+    expect(rewriteIn('markdown', desk)).toEqual(desk)
   })
 
-  // QA 2차 P0-A: URL-FORM literals inside document prose must round-trip
-  // byte-identically — this is the exact reproduce.mjs repro from the report
-  it('QA repro: URL-form body literals round-trip byte-identically', () => {
-    const body = 'Literal /__mdasset://example/doc and md-asset://example/doc.'
-    expect(rewriteOut('markdown', body)).toBe(body)
-    expect(rewriteIn('markdown', body)).toBe(body)
-    expect(rewriteIn('markdown', rewriteOut('markdown', { text: body }))).toEqual({ text: body })
-    const htmlBody = 'See /__preview://example/doc and html-asset://example/doc.'
-    expect(rewriteIn('html', rewriteOut('html', { body: htmlBody }))).toEqual({ body: htmlBody })
-    const docsBody = 'See /__media://example/doc and genoffice-docx-media://example/doc.'
-    expect(rewriteIn('docs', rewriteOut('docs', { text: docsBody }))).toEqual({ text: docsBody })
-  })
-
-  it('QA repro: markdown save body with URL-form text and imageSources is lossless', () => {
-    const req = {
-      text: 'Literal /__mdasset://example/doc and md-asset://example/doc.\n\n![](md-asset://img/1.png)',
-      imageSources: ['/__mdasset://img/1.png'], // browser form: the renderer fetches these
-      mode: 'save',
+  it('round-trips mixed documents byte-identically in body text', () => {
+    const mixed = {
+      text: '# Doc\nLiteral /__mdasset://example/doc and md-asset://example/doc.\n```\n<img src="/__mdasset://c">\n```',
+      imageSources: ['/__mdasset://img/1.png'],
     }
-    const toServer = rewriteIn('markdown', req)
-    // the body travels untouched; only the URL FIELD is mapped
-    expect(toServer.text).toBe(req.text)
-    expect(toServer.imageSources).toEqual(['md-asset://img/1.png']) // server form
-    expect(rewriteOut('markdown', toServer)).toEqual(req)
-  })
-
-  it('rewrites HTML URL attribute values but never text nodes', () => {
-    const html = '<p>keep md-asset://x as prose</p><img src="html-asset://y/a.png"><a href="html-preview://v/">t</a>'
-    const out = rewriteOut('html', html) as string
-    expect(out).toBe(
-      '<p>keep md-asset://x as prose</p><img src="/__htmlasset://y/a.png"><a href="/__preview://v/">t</a>',
-    )
-    expect(rewriteIn('html', out)).toBe(html)
+    const desk = rewriteIn('markdown', mixed) as typeof mixed
+    expect(desk.text).toBe(mixed.text)
+    expect(desk.imageSources).toEqual(['md-asset://img/1.png'])
+    const web = rewriteOut('markdown', desk) as typeof mixed
+    expect(web.text).toBe(mixed.text)
+    expect(web.imageSources).toEqual(['/__mdasset://img/1.png'])
   })
 })

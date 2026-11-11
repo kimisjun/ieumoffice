@@ -5,6 +5,14 @@
  * (an open reply carries the document bytes as a media URL, the renderer
  * passes image sources back on save) — those are rewritten here, on both
  * directions of every frame, keyed by the tab's app.
+ *
+ * Contract rule (QA 3차 P0-A, cases 1-4): rewriting happens ONLY in
+ * URL-typed CONTRACT FIELDS — whole values of URL fields, URL array items
+ * (`imageSources`…), and ATTRIBUTE VALUES inside real tags of markup fields
+ * (`html`, `content`…; comments and script/style bodies protected). Body
+ * text (`text`), code, prose and unknown fields are NEVER touched: a
+ * lone-URL document, a `src="…"` in prose or in a fenced code block
+ * round-trips byte-identically. No value-shape guessing.
  */
 
 export const SCHEME_REWRITES: Record<string, [string, string][]> = {
@@ -17,67 +25,102 @@ export const SCHEME_REWRITES: Record<string, [string, string][]> = {
 }
 
 /**
- * QA 2차 P0-A: rewriting is scoped to URL FIELDS, never free text.
- *
- * 1. whole-value strings that ARE a URL (imageSources entries, media URLs,
- *    file/asset paths — how URL fields travel the bridge); and
- * 2. HTML URL attribute values inside markup bodies (src/href/… — the URL
- *    fields of HTML content).
- *
- * Document text, code samples and prose that merely CONTAINS a URL-looking
- * literal pass through byte-identically in both directions — the QA repro
- * "Literal /__mdasset://example/doc and md-asset://example/doc." must
- * round-trip unchanged (QA_REPORT_2ND P0-A).
+ * URL-typed contract fields: their values are URLs by contract (no shape
+ * guessing). Arrays hold one URL per item.
  */
-const URL_ATTR_RE =
-  /(\s(?:src|href|poster|action|formaction|data-src|data-href|xlink:href)\s*=\s*["'])([^"']*)(["'])/gi
+const URL_FIELDS = new Set([
+  'src', 'href', 'url', 'dataUrl', 'target', 'poster', 'background', 'action',
+  'formaction', 'data-src', 'data-href', 'xlink:href', 'imageSource',
+  'mediaUrl', 'assetUrl',
+])
+const URL_ARRAY_FIELDS = new Set(['imageSources', 'media', 'assets'])
+/** markup-typed contract fields: only ATTRIBUTE VALUES inside real tags change */
+const MARKUP_FIELDS = new Set(['html', 'content', 'markup', 'svg'])
+const URL_ATTRS = 'src|href|poster|action|formaction|data-src|data-href|xlink:href'
 
-function rewriteSchemeLiterals(value: unknown, from: string, to: string): unknown {
-  const head = `${from}://`
-  const fixValue = (s: string): string =>
-    s.startsWith(head) && !/\s/.test(s) ? `${to}://${s.slice(head.length)}` : s
-  const fixString = (s: string): string => {
-    if (!s.includes('://')) return s
-    if (s.startsWith(head) && !/\s/.test(s)) return fixValue(s)
-    return s.replace(URL_ATTR_RE, (_m, pre: string, val: string, post: string) =>
-      `${pre}${fixValue(val)}${post}`)
+/**
+ * Surgical attribute rewriting for markup fields: only the values of URL
+ * attributes inside REAL start tags change. Comments and script/style bodies
+ * are hidden first; text nodes never sit inside a tag span, so prose that
+ * merely contains `src="…"` and code examples round-trip byte-identically
+ * (QA 3차 P0-A cases 3-4).
+ */
+function rewriteMarkupAttributes(
+  markup: string,
+  convert: (s: string) => string,
+): string {
+  const store: string[] = []
+  const hide = (s: string): string => {
+    store.push(s)
+    return `\u0000${store.length - 1}\u0000`
   }
-  const walk = (v: unknown): unknown => {
-    if (typeof v === 'string') return fixString(v)
-    if (Array.isArray(v)) return v.map(walk)
-    if (v !== null && typeof v === 'object') {
-      // only plain objects rebuild; typed arrays (decoded binaries) and other
-      // classed instances pass through untouched — index-key reconstruction
-      // would turn a Uint8Array into {0:1, 1:2, …}
-      const proto = Object.getPrototypeOf(v)
-      if (proto !== Object.prototype && proto !== null) return v
-      const out: Record<string, unknown> = {}
-      for (const [key, entry] of Object.entries(v as Record<string, unknown>)) {
-        out[key] = walk(entry)
-      }
-      return out
+  let out = markup.replace(
+    /<!--[\s\S]*?-->|<script\b[^>]*>[\s\S]*?<\/script\s*>|<style\b[^>]*>[\s\S]*?<\/style\s*>/gi,
+    hide,
+  )
+  out = out.replace(/<[a-zA-Z][^<>]*(?:"[^"]*"[^<>]*|'[^']*'[^<>]*)*>/g, (tag) =>
+    tag.replace(
+      new RegExp(`(\\s(?:${URL_ATTRS})\\s*=\\s*)(["'])([^"']*)\\2`, 'gi'),
+      (_m, pre: string, q: string, val: string) => `${pre}${q}${convert(val)}${q}`,
+    ),
+  )
+  return out.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => store[Number(i)] ?? '')
+}
+
+type Convert = (s: string) => string
+
+/**
+ * Contract-router: recurse through the payload and rewrite ONLY
+ * URL-typed fields (whole values), URL array items, and markup attribute
+ * values. `text` and every unknown field are NEVER touched. Typed arrays
+ * (decoded binaries) and classed instances pass through untouched —
+ * index-key reconstruction would turn a Uint8Array into {0:1, 1:2, …}.
+ */
+function routeContract(value: unknown, key: string | null, convert: Convert): unknown {
+  if (typeof value === 'string') {
+    if (key !== null && MARKUP_FIELDS.has(key)) return rewriteMarkupAttributes(value, convert)
+    if (key !== null && URL_FIELDS.has(key)) return convert(value)
+    return value // body/unknown fields: byte-preserved
+  }
+  if (Array.isArray(value)) {
+    if (URL_ARRAY_FIELDS.has(key ?? '')) {
+      return value.map((x) => (typeof x === 'string' ? convert(x) : routeContract(x, null, convert)))
     }
-    return v
+    return value.map((x) => routeContract(x, key, convert))
   }
-  return walk(value)
+  if (value !== null && typeof value === 'object') {
+    const proto = Object.getPrototypeOf(value)
+    if (proto !== Object.prototype && proto !== null) return value
+    const out: Record<string, unknown> = {}
+    for (const [k, entry] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = routeContract(entry, k, convert)
+    }
+    return out
+  }
+  return value
+}
+
+function makeConverter(from: string, to: string): Convert {
+  const head = `${from}://`
+  return (s: string): string => (s.includes(head) ? s.split(head).join(`${to}://`) : s)
 }
 
 /** server → browser: scheme literals become the same-origin paths the served
- *  bundle code expects */
+ *  bundle code expects (contract fields only) */
 export function rewriteOut(app: string, value: unknown): unknown {
   const rules = SCHEME_REWRITES[app]
   if (!rules) return value
   let out = value
-  for (const [scheme, prefix] of rules) out = rewriteSchemeLiterals(out, scheme, prefix)
+  for (const [scheme, prefix] of rules) out = routeContract(out, null, makeConverter(scheme, prefix))
   return out
 }
 
 /** browser → server: same-origin paths become the scheme literals the
- *  main-process handlers expect */
+ *  main-process handlers expect (contract fields only) */
 export function rewriteIn(app: string, value: unknown): unknown {
   const rules = SCHEME_REWRITES[app]
   if (!rules) return value
   let out = value
-  for (const [scheme, prefix] of rules) out = rewriteSchemeLiterals(out, prefix, scheme)
+  for (const [scheme, prefix] of rules) out = routeContract(out, null, makeConverter(prefix, scheme))
   return out
 }

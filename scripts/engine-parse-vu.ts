@@ -50,45 +50,37 @@ async function main(): Promise<void> {
     }
     const book = (result as { book: unknown }).book as {
       title?: string
-      spine?: { items?: { title?: string; id?: string; href?: string }[] }
+      metadata?: { title?: string | null }
+      spine?: { items?: { path?: string; title?: string; id?: string }[] }
+      readText?: (path: string) => Promise<{ text?: string } | string | null>
     }
-    // chapter text comes from the ENGINE's own opened archive (its parse),
-    // not from an external zip listing
-    const archive = openedArchive(book as never)
-    const chapterTexts: string[] = []
-    const spineHrefs = (book.spine?.items ?? [])
-      .map((i) => (i as { href?: string }).href ?? '')
+    // QA 3차 P1-B: the spine contract field is `path` (zip entry path) and the
+    // text comes from the engine's own `readText(path)` — reading `href` left
+    // the spine list empty and fell back to EVERY xhtml, so markers outside
+    // the reading order were false positives (the QA's negative control).
+    // An unresolved spine is an ERROR, never a wider scan.
+    const spinePaths = (book.spine?.items ?? [])
+      .map((i) => (i as { path?: string }).path ?? '')
       .filter(Boolean)
-    if (archive) {
-      // resolve spine hrefs against the archive (they are OPF-relative)
-      const names = Object.keys(archive.files).filter((n) => n.endsWith('.xhtml') || n.endsWith('.html'))
-      const wanted = spineHrefs.length
-        ? names.filter((n) =>
-            spineHrefs.some((h) => n.endsWith(decodeURIComponent(h).replace(/^\.\//, ''))),
-          )
-        : names
-      // QA 2차 P1-B: when the spine is known, ONLY spine documents count —
-      // falling back to every xhtml would make markers outside the reading
-      // order false-positive (the QA's negative control). An unresolved spine
-      // is an ERROR, never a wider scan.
-      if (spineHrefs.length && wanted.length === 0) {
-        console.log(
-          JSON.stringify({ status: 'error', error: 'spine hrefs resolved to no archive documents', spineHrefs }),
-        )
-        return
-      }
-      for (const name of wanted) {
-        const entry = archive.file(name)
-        if (entry) chapterTexts.push(await entry.async('string'))
-      }
+    if (spinePaths.length === 0) {
+      console.log(JSON.stringify({ status: 'error', error: 'spine has no items' }))
+      return
+    }
+    const chapterTexts: string[] = []
+    for (const path of spinePaths) {
+      const decoded = book.readText ? await book.readText(path) : null
+      const text =
+        typeof decoded === 'string' ? decoded : String((decoded as { text?: string } | null)?.text ?? '')
+      chapterTexts.push(text)
     }
     const joined = chapterTexts.join('\n')
     if (needle) needles[needle] = joined.includes(needle)
     console.log(
       JSON.stringify({
         status: 'ok',
-        title: book.title ?? null,
+        title: book.metadata?.title ?? book.title ?? null,
         spineTitles: (book.spine?.items ?? []).map((i) => i.title ?? i.id ?? ''),
+        spinePaths,
         chapterCount: chapterTexts.length,
         textLength: joined.length,
         needles,
