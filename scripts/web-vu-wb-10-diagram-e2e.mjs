@@ -16,7 +16,7 @@
 import { createRequire } from 'node:module'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFileSync, copyFileSync } from 'node:fs'
+import { readFileSync, copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { inflateSync } from 'node:zlib'
 import { resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -77,13 +77,22 @@ function pdfTextProbe(pdfPath, needle, fixture) {
     if (s < 0) break
     const e = raw.indexOf('endstream', s)
     if (e < 0) break
-    const start = raw[raw[s - 1] === '\n' ? s + 6 : s + 7]
-    const body = bytes.subarray(s + 6, e)
-    try { chunks.push(inflateSync(body).toString('utf8')) } catch { /* not flate */ }
+    // skip the EOL that follows the `stream` keyword before the data
+    let start = s + 6
+    while (start < e && (bytes[start] === 0x0d || bytes[start] === 0x0a)) start += 1
+    const body = bytes.subarray(start, e)
+    try { chunks.push(inflateSync(body).toString('utf8')) } catch {
+      try { chunks.push(inflateSync(body, { finishFlush: 2 }).toString('utf8')) } catch { /* not flate */ }
+    }
     idx = e + 9
   }
   const text = chunks.join('\n')
-  return { marker: text.includes(needle), fixture: text.includes(fixture), inflatedStreams: chunks.length }
+  // also accept uncompressed streams: the raw bytes may carry the strings
+  return {
+    marker: text.includes(needle) || raw.includes(needle),
+    fixture: text.includes(fixture) || raw.includes(fixture),
+    inflatedStreams: chunks.length,
+  }
 }
 
 const visionAdjudications = (() => {
@@ -242,11 +251,33 @@ try {
     const pdfBytes = readFileSync(pdf)
     const svgText = readFileSync(svg, 'utf8')
     const pdfContent = pdfTextProbe(pdf, MARK, 'VU-WB-10')
+    // QA 3차 P1-D: the PDF's OWN content is read back through the product's
+    // engine (pdf→docx convert, OOXML text) — draw.io's PDF export subsets
+    // fonts, so raw stream bytes carry glyph codes, not strings
+    const pdfDocx = '/tmp/web-e2e/diagram-pdf-reparse.docx'
+    let pdfEngineText = { marker: false, fixture: false }
+    try {
+      cli(['convert', pdf, '--to', 'docx', '--out', pdfDocx, '--force'])
+      const xml = execFileSync('unzip', ['-p', pdfDocx, 'word/document.xml'], { encoding: 'utf8', timeout: 60000 })
+      // the marker wraps inside the shape and the pdf→docx extractor drops the
+      // wrap-hyphen (DGM-SLICE-1794… → DGM-SLICE1794…) — strip the XML tags,
+      // flatten whitespace, and match hyphen-insensitively (documented
+      // normalization: every marker char present, in order)
+      const flat = xml.replace(/<[^>]+>/g, '').replace(/[\s\u3000]+/g, '')
+      const dehyphen = (s) => s.replace(/-/g, '')
+      pdfEngineText = {
+        markerExact: flat.includes(MARK),
+        marker: dehyphen(flat).includes(dehyphen(MARK)),
+        fixture: flat.includes('VU-WB-10'),
+        extractedText: flat.slice(0, 160),
+      }
+    } catch (e) { pdfEngineText = { marker: false, fixture: false, error: String(e).slice(0, 150) } }
     s5 = {
       ok: pdfBytes.length > 400 && svgText.includes(MARK) && svgText.includes('VU-WB-10')
-        && pdfContent.marker && pdfContent.fixture,
+        && pdfEngineText.marker && pdfEngineText.fixture,
       pdf: { size: pdfBytes.length, sha256: sha256(pdfBytes) },
-      pdfContent,
+      pdfContentProbe: pdfContent,
+      pdfEngineText,
       svgContent: { marker: svgText.includes(MARK), fixture: svgText.includes('VU-WB-10') },
     }
   } catch (e) { s5 = { ok: false, error: String(e).slice(0, 250) } }
