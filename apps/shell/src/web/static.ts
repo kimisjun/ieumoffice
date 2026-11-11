@@ -371,12 +371,14 @@ function diagramOutPath(...parts: string[]): string {
     : join(app.getAppPath(), '..', 'diagram', 'out', ...parts)
 }
 
-/** the frame runs on the OTHER loopback host (localhost ↔ 127.0.0.1) so it is
- *  cross-origin from the app page; frame-ancestors must cover the parent on
- *  either host */
+/** the frame runs on the DEDICATED mirror port (app port + 1) so it is
+ *  cross-origin from the app page; frame-ancestors must cover the PARENT —
+ *  the app's own port, one below the mirror's (QA 2차 P0-C) */
 function loopbackAncestors(reqHost: string): string[] {
-  const port = reqHost.includes(':') ? reqHost.slice(reqHost.lastIndexOf(':')) : ''
-  return [`http://127.0.0.1${port}`, `http://localhost${port}`]
+  const portPart = reqHost.includes(':') ? Number(reqHost.slice(reqHost.lastIndexOf(':') + 1)) : 0
+  const appPort = portPart > 0 ? portPart - 1 : 0
+  const suffix = appPort > 0 ? `:${appPort}` : ''
+  return [`http://127.0.0.1${suffix}`, `http://localhost${suffix}`]
 }
 
 function serveDrawioArea(
