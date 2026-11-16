@@ -14,11 +14,12 @@ import {
 
 /**
  * Local request/reply channel for the genoffice CLI (`open --slide`,
- * `selection`). Security model: the socket lives in userData (per-user
- * directory, 0600 on POSIX; a per-user named pipe on Windows), every request
- * must carry the random token from userData/control.json (0600), one request
- * per connection, 64 KB cap, and the only commands are "show this spot" and
- * "read the selection" — nothing writes a file or runs code from the request.
+ * `selection`, the read-only `open_documents` listing). Security model: the
+ * socket lives in userData (per-user directory, 0600 on POSIX; a per-user
+ * named pipe on Windows), every request must carry the random token from
+ * userData/control.json (0600), one request per connection, 64 KB cap, and the
+ * only commands are "show this spot", "read the selection", and "list the open
+ * documents" — nothing writes a file or runs code from the request.
  */
 export type ControlHandler = (request: ControlRequest) => Promise<ControlReply>
 
@@ -45,8 +46,14 @@ export function parseEnvelope(line: string): ControlEnvelope | null {
   if (!raw || typeof raw !== 'object') return null
   const env = raw as Partial<ControlEnvelope>
   if (typeof env.token !== 'string' || !env.request || typeof env.request !== 'object') return null
-  const req = env.request as Partial<ControlRequest>
-  if ((req.cmd !== 'open' && req.cmd !== 'selection') || typeof req.path !== 'string') return null
+  const req = env.request as { cmd?: string; path?: unknown }
+  // `open_documents` takes no path; every other command must name its file,
+  // and anything else is an unsupported command
+  if (req.cmd === 'open' || req.cmd === 'selection') {
+    if (typeof req.path !== 'string') return null
+  } else if (req.cmd !== 'open_documents') {
+    return null
+  }
   return env as ControlEnvelope
 }
 
