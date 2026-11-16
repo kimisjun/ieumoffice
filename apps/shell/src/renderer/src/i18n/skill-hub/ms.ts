@@ -1,0 +1,30 @@
+import type { zh } from './zh'
+
+export const ms = {
+  name: 'Hutan Ieum',
+  tabGet: 'Dapatkan',
+  tabMine: 'Kemahiran Saya',
+  tabShare: 'Kongsi',
+  shareComingSoon: 'Akan datang',
+  getIntro:
+    'Cari kemahiran di GitHub dan tambahkannya. Kemahiran yang ditambah boleh digunakan oleh AI.',
+  repoLabel: 'Repositori GitHub',
+  repoPlaceholder: 'owner/repo',
+  pathLabel: 'Laluan folder (pilihan)',
+  pathPlaceholder: 'skills/example',
+  find: 'Cari',
+  finding: 'Mengambil dari GitHub…',
+  previewAction: 'Pratonton',
+  installAction: 'Pasang',
+  labelName: 'Nama',
+  labelDescription: 'Penerangan',
+  labelVersion: 'Versi',
+  labelBody: 'Isi',
+  versionBadge: 'Versi {version}',
+  installCount: '{n} pemasangan',
+  mineEmpty: 'Belum ada kemahiran yang dipasang.',
+  provBuiltin: 'Terbina dalam',
+  provOfficial: 'Rasmi',
+  provCommunity: 'Komuniti',
+  provLocal: 'Komputer ini',
+} satisfies Record<keyof typeof zh, string>

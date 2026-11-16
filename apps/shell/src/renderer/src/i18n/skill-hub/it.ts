@@ -1,0 +1,30 @@
+import type { zh } from './zh'
+
+export const it = {
+  name: 'Foresta Ieum',
+  tabGet: 'Ottieni',
+  tabMine: 'Le mie competenze',
+  tabShare: 'Condividi',
+  shareComingSoon: 'In arrivo',
+  getIntro:
+    'Trova competenze su GitHub e aggiungile. Le competenze aggiunte possono essere usate dall’IA.',
+  repoLabel: 'Repository GitHub',
+  repoPlaceholder: 'owner/repo',
+  pathLabel: 'Percorso cartella (facoltativo)',
+  pathPlaceholder: 'skills/example',
+  find: 'Cerca',
+  finding: 'Recupero da GitHub…',
+  previewAction: 'Anteprima',
+  installAction: 'Installa',
+  labelName: 'Nome',
+  labelDescription: 'Descrizione',
+  labelVersion: 'Versione',
+  labelBody: 'Corpo',
+  versionBadge: 'Versione {version}',
+  installCount: '{n} installazioni',
+  mineEmpty: 'Non sono ancora installate competenze.',
+  provBuiltin: 'Integrata',
+  provOfficial: 'Ufficiale',
+  provCommunity: 'Community',
+  provLocal: 'Questo computer',
+} satisfies Record<keyof typeof zh, string>

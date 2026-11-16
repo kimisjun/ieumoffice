@@ -89,6 +89,20 @@ export type UserSkillUnreadable = 'no-frontmatter' | 'bad-name' | 'too-large' | 
  */
 export type UserSkillEditorsValue = 'all' | string[]
 
+/**
+ * Where a skill the app knows came from (decision 0152). `builtin` ships with
+ * the app, `official` is the product's own repository, `community` is another
+ * GitHub repository, `local` was made or taken in on this PC.
+ */
+export type UserSkillProvenanceSource = 'builtin' | 'official' | 'community' | 'local'
+
+/** A skill's provenance as the screens see it (decision 0152) */
+export interface UserSkillProvenance {
+  source: UserSkillProvenanceSource
+  /** the web address it was taken from (GitHub skills) */
+  sourceUrl?: string | undefined
+}
+
 /** One skill as the screens see it (no folder paths) */
 export interface UserSkillView {
   /** `source:name`, `plugin:<plugin>:<name>` */
@@ -120,6 +134,13 @@ export interface UserSkillView {
   github: { repo: string; ref: string; path: string; commit: string } | undefined
   /** the skill lives in the app's own folder (`~/.ieumoffice/skills`) */
   owned: boolean
+  /**
+   * The version its SKILL.md named when the app recorded it (decision 0152);
+   * for a skill the app did not install, its file's value now
+   */
+  version?: string | undefined
+  /** where it came from, when the app knows (decision 0152) */
+  provenance?: UserSkillProvenance | undefined
   /** what the more-menu offers (spec 5.1) */
   can: {
     edit: boolean
@@ -297,6 +318,8 @@ export interface UserSkillImportCandidateView {
   collision: boolean
   /** its SKILL.md has nothing after the front matter (absent from an older main process) */
   emptyBody?: boolean | undefined
+  /** the version its SKILL.md names, when it names one (decision 0152) */
+  version?: string | undefined
   problem: UserSkillUnreadable | 'duplicate' | undefined
 }
 

@@ -316,7 +316,9 @@ describe('a request for Settings while the welcome window is up', () => {
 describe('home screen without the removed areas', () => {
   it('has no cloud projects entry, sign-in or credits', async () => {
     await renderHome(statuses({ state: 'ready' }, { state: 'ready' }))
-    expect(host.querySelectorAll('.sidebar-nav .nav-item')).toHaveLength(3)
+    // Recent, Starred, Ask AI and the skills forest (Ieum Forest); the count
+    // grew with the forest, so grab by label when this needs changing again
+    expect(host.querySelectorAll('.sidebar-nav .nav-item')).toHaveLength(4)
     expect(host.querySelector('.login-hint, .cloud-projects, .nav-external')).toBeNull()
     expect(host.textContent).not.toMatch(/credits|sign in/i)
   })

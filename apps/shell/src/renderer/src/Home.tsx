@@ -59,7 +59,7 @@ import type { SettingsTarget } from './SettingsModal'
 import { skillUpdateDue } from './IntegrationsPane'
 import { onFilesChanged } from './file-events'
 import { FirstConnectionDialog } from './FirstConnectionNotice'
-import { firstConnectionNoticeShown, useAiFeaturesOn } from './ai-features'
+import { firstConnectionNoticeShown, useAiFeaturesOn, skillHubAvailable } from './ai-features'
 import { LaunchRecoveryList } from './RecoveryList'
 import { OneTimeEditorPick } from './editor-choice/OneTimeEditorPick'
 import type { SubscriptionConnection } from './subscription-client'
@@ -76,6 +76,8 @@ import { driveUiText } from './i18n/strings-drive'
 import { ProjectsPanel, subscribeProjectScreen, type ProjectScreenRequest } from './ProjectsPanel'
 import { projectsText } from './i18n/strings-projects'
 import { skillsText } from './i18n/strings-skills'
+import { skillHubText } from './i18n/strings-skill-hub'
+import { SkillHubPanel } from './skill-hub/SkillHubPanel'
 
 declare global {
   interface Window {
@@ -1165,6 +1167,17 @@ export function Home({
   useEffect(() => {
     if (!aiOn) setAskMode(false)
   }, [aiOn])
+  // the skills forest (Ieum Forest) takes over the content area the same way;
+  // its entry and page go away with AI off and while the connection state
+  // reads "connection needed" (the readiness `homeAiEntry` reports)
+  const skillHubOffered = skillHubAvailable(
+    aiOn,
+    homeAiEntry(aiSettings, connection.statuses).state,
+  )
+  const [skillHubMode, setSkillHubMode] = useState(false)
+  useEffect(() => {
+    if (!skillHubOffered) setSkillHubMode(false)
+  }, [skillHubOffered])
   // a project chat the project screen handed to the ask panel; cleared when the panel goes
   const [askOpenChat, setAskOpenChat] = useState<{
     projectId: string
@@ -1191,6 +1204,7 @@ export function Home({
         setProjectsMode(true)
         setAskMode(false)
         setDriveMode(false)
+        setSkillHubMode(false)
         setSelectedFolder(null)
         setProjectRequest(request)
       }),
@@ -1682,6 +1696,7 @@ export function Home({
     setAskMode(false)
     setDriveMode(false)
     setProjectsMode(false)
+    setSkillHubMode(false)
     setSelected(new Set())
     setRowMenu(null)
     setGroupFilter(null)
@@ -3340,7 +3355,15 @@ export function Home({
     })
 
   const activeNav =
-    !selectedFolder && !driveMode ? (projectsMode ? 'projects' : askMode ? 'ask' : view) : null
+    !selectedFolder && !driveMode
+      ? projectsMode
+        ? 'projects'
+        : askMode
+          ? 'ask'
+          : skillHubMode
+            ? 'skillHub'
+            : view
+      : null
 
   const onSidebarResizeStart = (e: ReactPointerEvent<HTMLDivElement>) => {
     const startX = e.clientX
@@ -3426,6 +3449,7 @@ export function Home({
                 setAskMode(true)
                 setDriveMode(false)
                 setProjectsMode(false)
+                setSkillHubMode(false)
                 setSelectedFolder(null)
                 setSelected(new Set())
                 setRowMenu(null)
@@ -3457,6 +3481,7 @@ export function Home({
                 setProjectsMode(true)
                 setAskMode(false)
                 setDriveMode(false)
+                setSkillHubMode(false)
                 setSelectedFolder(null)
                 setSelected(new Set())
                 setRowMenu(null)
@@ -3512,6 +3537,41 @@ export function Home({
               </span>
             </button>
           ) : null}
+          {/* the skills forest (Ieum Forest) below the agent entry: an AI
+              part, hidden with AI off and while the connection reads needed */}
+          {skillHubOffered && (
+            <button
+              className={`nav-item${activeNav === 'skillHub' ? ' active' : ''}`}
+              aria-current={activeNav === 'skillHub' ? 'page' : undefined}
+              data-testid="home-skill-hub-nav"
+              title={skillHubText(lang, 'getIntro')}
+              onClick={() => {
+                setSkillHubMode(true)
+                setAskMode(false)
+                setDriveMode(false)
+                setProjectsMode(false)
+                setSelectedFolder(null)
+                setSelected(new Set())
+                setRowMenu(null)
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="M8 1.8l3.4 4.7h-2l2.4 3.3h-2l2 2.7H4.2l2-2.7h-2l2.4-3.3h-2z"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M8 12.5v1.7"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  strokeLinecap="round"
+                />
+              </svg>
+              <span className="nav-label">{skillHubText(lang, 'name')}</span>
+            </button>
+          )}
           {driveOffered && (
             <button
               className={`nav-item${driveMode && !selectedFolder ? ' active' : ''}`}
@@ -3520,6 +3580,7 @@ export function Home({
                 setDriveMode(true)
                 setAskMode(false)
                 setProjectsMode(false)
+                setSkillHubMode(false)
                 setSelectedFolder(null)
                 setSelected(new Set())
                 setRowMenu(null)
@@ -3567,6 +3628,8 @@ export function Home({
             setAskOpenChat((prev) => ({ ...chat, seq: (prev?.seq ?? 0) + 1 }))
           }}
         />
+      ) : skillHubMode && skillHubOffered ? (
+        <SkillHubPanel lang={lang} locale={i18n.dateLocale} />
       ) : askMode && aiOn ? (
         <KbAskPanel
           connection={connection}

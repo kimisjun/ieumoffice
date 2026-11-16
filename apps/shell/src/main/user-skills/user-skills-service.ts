@@ -10,6 +10,7 @@
  * use their own temporary folder under the OS temp folder.
  */
 import { randomBytes } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import {
   copyFile,
   mkdir,
@@ -49,6 +50,7 @@ import {
   initialUserSkillState,
   installImportedSkills,
   isInsideDir,
+  isReservedUserSkillName,
   isValidUserSkillName,
   listSkillFolderFiles,
   listUserSkills,
@@ -75,6 +77,7 @@ import {
   type SkillHistoryReason,
   type SkillImport,
   type SkillImportCandidate,
+  type SkillImportErrorKind,
   type SkillImportSource,
   type UserSkillInvoke,
   type UserSkillSettings,
@@ -92,6 +95,7 @@ import {
   type UserSkillImportText,
   type UserSkillInstallRequest,
   type UserSkillNameProblem,
+  type UserSkillProvenance,
   type UserSkillSaveInput,
   type UserSkillStatePatch,
   type UserSkillTemplateInput,
@@ -102,6 +106,15 @@ import {
   type UserSkillsFailReason,
   type UserSkillsResult,
 } from '@genoffice/electron-utils/user-skills-channels'
+import { checkSkillInstallDir, type SkillInstallCheckReason } from '../skill-target'
+import {
+  dropSkillProvenance,
+  moveSkillProvenance,
+  provenanceOfGitHub,
+  readSkillProvenance,
+  recordSkillProvenance,
+  skillVersionOf,
+} from './skill-provenance'
 import { readSkillSettings, updateSkillSettings } from '../app-settings'
 
 /** Largest skill file the AI may read in one call (spec 5.8; tunable) */
@@ -175,6 +188,38 @@ export function failureOf(error: unknown): UserSkillsFail {
   return fail('failed')
 }
 
+/**
+ * A refused install folder as a channel reason (decision 0152): a folder that
+ * hides a hostile layout is `unsafe`, one over the limits `too-large`, one
+ * whose required front matter is missing or whose name is not readable
+ * `not-installable`, one that cannot be walked `unreadable`.
+ */
+function installCheckReasonOf(reason: SkillInstallCheckReason): UserSkillsFailReason {
+  switch (reason) {
+    case 'too-large':
+      return 'too-large'
+    case 'unreadable':
+      return 'unreadable'
+    case 'bad-frontmatter':
+    case 'bad-name':
+      return 'not-installable'
+    default:
+      return 'unsafe'
+  }
+}
+
+function installCheckFail(reason: SkillInstallCheckReason): UserSkillsFail {
+  return fail(installCheckReasonOf(reason), reason)
+}
+
+/** The same refusal as a thrown core error, for the write paths that already throw */
+function installCheckError(reason: SkillInstallCheckReason): SkillImportError {
+  const mapped = installCheckReasonOf(reason)
+  const kind: SkillImportErrorKind =
+    mapped === 'unreadable' ? 'failed' : (mapped as SkillImportErrorKind)
+  return new SkillImportError(kind, `The skill folder is refused: ${reason}`)
+}
+
 function sameName(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase()
 }
@@ -236,6 +281,8 @@ function viewOf(
   shadowedBy: string | undefined,
   /** an own skill whose folder really is in the app's skills folder (not a link leading out) */
   owned: boolean,
+  provenance: UserSkillProvenance | undefined,
+  version: string | undefined,
 ): UserSkillView {
   const other = skill.source === 'user' || skill.source === 'plugin' || skill.source === 'codex'
   return {
@@ -259,6 +306,8 @@ function viewOf(
     bytes: skill.bytes,
     github,
     owned,
+    ...(version ? { version } : {}),
+    ...(provenance ? { provenance } : {}),
     can: {
       edit: owned,
       copyToMine: skill.source === 'builtin' || other,
@@ -272,7 +321,17 @@ function viewOf(
   }
 }
 
+/** The version a folder's SKILL.md names now, when it can be read at all */
+function fileVersionSync(dir: string): string | undefined {
+  try {
+    return skillVersionOf(readFileSync(join(dir, 'SKILL.md'), 'utf8'))
+  } catch {
+    return undefined
+  }
+}
+
 function candidateView(candidate: SkillImportCandidate): UserSkillImportCandidateView {
+  const version = candidate.problem ? undefined : fileVersionSync(candidate.dir)
   return {
     key: candidate.key,
     rel: candidate.rel,
@@ -295,6 +354,7 @@ function candidateView(candidate: SkillImportCandidate): UserSkillImportCandidat
     warningCount: candidate.warningCount,
     collision: candidate.collision,
     emptyBody: candidate.emptyBody,
+    ...(version ? { version } : {}),
     problem: candidate.problem,
   }
 }
@@ -585,6 +645,51 @@ export function createUserSkillsService(deps: UserSkillsServiceDeps) {
     return readFile(join(dir, 'SKILL.md'), 'utf8').catch(() => undefined)
   }
 
+  /** The version a skill's file names now (builtin and own skills) */
+  async function fileVersionOf(dir: string): Promise<string | undefined> {
+    const text = await readSkillMdText(dir)
+    return text === undefined ? undefined : skillVersionOf(text)
+  }
+
+  /** Where an own skill came from when nothing was recorded (decision 0152) */
+  async function derivedProvenance(dir: string): Promise<UserSkillProvenance> {
+    const record = await readIeumSourceRecord(dir)
+    return record
+      ? provenanceOfGitHub(record.repo, record.commit, record.path)
+      : { source: 'local' }
+  }
+
+  /** Record what landed in the app's skills folder under its identifier */
+  async function recordInstalled(
+    id: string,
+    dir: string,
+    provenance: { source: 'official' | 'community' | 'local'; sourceUrl?: string | undefined },
+  ): Promise<void> {
+    const version = await fileVersionOf(dir)
+    recordSkillProvenance(settingsPath(), id, {
+      source: provenance.source,
+      ...(provenance.sourceUrl ? { sourceUrl: provenance.sourceUrl } : {}),
+      ...(version ? { version } : {}),
+    })
+  }
+
+  /**
+   * After an own skill's own file was rewritten in place (edit, restore):
+   * whatever was recorded stays (its source and address), the version follows
+   * the file when it names one, and the record follows a rename.
+   */
+  function noteRewrite(prevId: string, id: string, version: string | undefined): void {
+    const ledger = readSkillProvenance(settingsPath())
+    const prev = ledger[prevId] ?? ledger[id]
+    if (prevId !== id) moveSkillProvenance(settingsPath(), prevId, id)
+    const kept = version ?? prev?.version
+    recordSkillProvenance(settingsPath(), id, {
+      source: prev?.source ?? 'local',
+      ...(prev?.sourceUrl ? { sourceUrl: prev.sourceUrl } : {}),
+      ...(kept ? { version: kept } : {}),
+    })
+  }
+
   /** An own skill as it is just before another version replaces it */
   async function replacedSkillOf(id: string): Promise<ReplacedSkill | undefined> {
     const skill = await find(id)
@@ -677,6 +782,9 @@ export function createUserSkillsService(deps: UserSkillsServiceDeps) {
    * the given folders (each is kept as an earlier version first).
    */
   async function place(work: string, name: string, replaceDirs: string[]): Promise<void> {
+    // the finished folder passes the install gate before anything is swapped
+    const checked = await checkSkillInstallDir(work)
+    if (!checked.ok) throw installCheckError(checked.reason)
     const undoKept = await keepVersions(replaceDirs, name, 'replace')
     try {
       await commitSkillInstall(appSkillsDir(), [
@@ -765,6 +873,7 @@ export function createUserSkillsService(deps: UserSkillsServiceDeps) {
         if (request.invoke) setStateValue(settings, newId, 'app', { invoke: request.invoke })
         for (const other of elsewhere) turnOff(settings, other)
       })
+      noteRewrite(target.id, newId, skillVersionOf(text))
       return { ok: true, id: newId }
     }
 
@@ -826,6 +935,8 @@ export function createUserSkillsService(deps: UserSkillsServiceDeps) {
       if (target) turnOff(settings, target)
       for (const other of elsewhere) turnOff(settings, other)
     })
+    // a skill made or copied in here starts as `local` (decision 0152)
+    await recordInstalled(id, join(appSkillsDir(), name), { source: 'local' })
     return { ok: true, id }
   }
 
@@ -837,6 +948,7 @@ export function createUserSkillsService(deps: UserSkillsServiceDeps) {
       const all = await resolved()
       const { shadowed } = pickEnabledUserSkills(all)
       const pushedBack = new Map(shadowed.map((entry) => [entry.skill.id, entry.by]))
+      const ledger = readSkillProvenance(settingsPath())
       const views: UserSkillView[] = []
       for (const skill of all) {
         let github: UserSkillView['github']
@@ -852,7 +964,20 @@ export function createUserSkillsService(deps: UserSkillsServiceDeps) {
           }
         }
         const owned = skill.source === 'app' && (await ownedDir(skill)) !== undefined
-        views.push(viewOf(skill, github, pushedBack.get(skill.id), owned))
+        // provenance and version (decision 0152): builtins and own skills only
+        let provenance: UserSkillProvenance | undefined
+        let version: string | undefined
+        if (skill.source === 'builtin') {
+          provenance = { source: 'builtin' }
+          version = await fileVersionOf(skill.dir)
+        } else if (skill.source === 'app') {
+          const entry = ledger[skill.id]
+          provenance = entry
+            ? { source: entry.source, ...(entry.sourceUrl ? { sourceUrl: entry.sourceUrl } : {}) }
+            : await derivedProvenance(skill.dir)
+          version = entry?.version ?? (await fileVersionOf(skill.dir))
+        }
+        views.push(viewOf(skill, github, pushedBack.get(skill.id), owned, provenance, version))
       }
       return views
     },
@@ -957,6 +1082,7 @@ export function createUserSkillsService(deps: UserSkillsServiceDeps) {
           setStateValue(settings, other.id, other.source, { enabled: true })
         }
       })
+      dropSkillProvenance(settingsPath(), skill.id)
       return { ok: true }
     },
 
@@ -1007,6 +1133,8 @@ export function createUserSkillsService(deps: UserSkillsServiceDeps) {
         clearState(settings, newId)
         turnOff(settings, skill)
       })
+      // a copy made here is `local` from now on (decision 0152)
+      await recordInstalled(newId, join(appSkillsDir(), skill.name), { source: 'local' })
       return { ok: true, id: newId }
     },
 
@@ -1091,6 +1219,20 @@ export function createUserSkillsService(deps: UserSkillsServiceDeps) {
       UserSkillsResult<{ installed: Array<{ key: string; id: string }>; skipped: string[] }>
     > {
       try {
+        // the install gate (decision 0152) runs before anything is kept or
+        // swapped, on exactly the candidates that would be copied: candidates
+        // the pipeline itself refuses keep their own reasons, reserved names
+        // theirs, and a taken name without a `replace` choice never reaches a
+        // copy (it is skipped or answered with `needs-choice`)
+        const existingNames = await appSkillFoldersByName(appSkillsDir())
+        for (const candidate of imported.candidates) {
+          if (!request.selected.includes(candidate.key)) continue
+          if (candidate.problem || isReservedUserSkillName(candidate.name)) continue
+          const taken = (existingNames.get(candidate.name.toLowerCase()) ?? []).length > 0
+          if (taken && request.onCollision[candidate.key] !== 'replace') continue
+          const checked = await checkSkillInstallDir(candidate.dir)
+          if (!checked.ok) return installCheckFail(checked.reason)
+        }
         const replacedByKey = new Map<string, ReplacedSkill>()
         const taken = await takenNames()
         const undoKept: Array<() => Promise<void>> = []
@@ -1115,12 +1257,22 @@ export function createUserSkillsService(deps: UserSkillsServiceDeps) {
           throw error
         }
         const installed: Array<{ key: string; id: string }> = []
+        const origin = imported.origin
         for (const skill of done.installed) {
           const id = userSkillId('app', skill.name)
           installed.push({ key: skill.key, id })
           const old = skill.replaced ? replacedByKey.get(skill.key) : undefined
           if (old) await keepAcrossReplace(old, id, skill.dir)
           else changeSettings((settings) => clearState(settings, id))
+          // the address path is the one the source record keeps (the candidate's rel)
+          const rel = imported.candidates.find((found) => found.key === skill.key)?.rel ?? ''
+          await recordInstalled(
+            id,
+            skill.dir,
+            origin.kind === 'github'
+              ? provenanceOfGitHub(origin.repo, origin.commit, rel)
+              : { source: 'local' },
+          )
         }
         return { ok: true, installed, skipped: done.skipped }
       } catch (error) {
@@ -1217,6 +1369,15 @@ export function createUserSkillsService(deps: UserSkillsServiceDeps) {
         return fail(skill ? 'not-owned' : 'not-found')
       }
       try {
+        // the update's folder passes the same install gate before it replaces
+        for (const candidate of check.update.candidates) {
+          if (candidate.problem || isReservedUserSkillName(candidate.name)) continue
+          const checked = await checkSkillInstallDir(candidate.dir)
+          if (!checked.ok) {
+            await disposeSkillImport(check.update)
+            return installCheckFail(checked.reason)
+          }
+        }
         const old = await replacedSkillOf(skill.id)
         let undoKept = async () => {}
         let done: Awaited<ReturnType<typeof applyGitHubSkillUpdate>>
@@ -1242,6 +1403,16 @@ export function createUserSkillsService(deps: UserSkillsServiceDeps) {
         }
         const newId = userSkillId('app', done.name)
         await keepAcrossReplace(old ?? { id: skill.id, editorsText: undefined }, newId, done.dir)
+        // the record follows a rename and points at the new commit (decision 0152)
+        if (newId !== skill.id) moveSkillProvenance(settingsPath(), skill.id, newId)
+        const from = provenanceOfGitHub(check.record.repo, check.commit, check.record.path)
+        const prev = readSkillProvenance(settingsPath())[newId]
+        const version = (await fileVersionOf(done.dir)) ?? prev?.version
+        recordSkillProvenance(settingsPath(), newId, {
+          source: from.source,
+          sourceUrl: from.sourceUrl,
+          ...(version ? { version } : {}),
+        })
         return { ok: true, id: newId }
       } catch (error) {
         return failureOf(error)
@@ -1332,6 +1503,8 @@ export function createUserSkillsService(deps: UserSkillsServiceDeps) {
         if (renamed) await store.follow(skill.name, name).catch(() => undefined)
         const newId = userSkillId('app', name)
         changeSettings((settings) => moveState(settings, skill.id, newId))
+        // what came back is what its file names now (decision 0152)
+        noteRewrite(skill.id, newId, await fileVersionOf(target))
         return { ok: true, id: newId }
       } catch (error) {
         return failureOf(error)
