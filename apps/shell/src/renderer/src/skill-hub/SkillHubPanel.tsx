@@ -395,11 +395,6 @@ function SkillHubGetTab({ api, lang, locale }: { api: SkillHubApi; lang: Lang; l
                           {y('versionBadge', { version: card.version })}
                         </span>
                       )}
-                      {card.installs !== undefined && (
-                        <span className="ysp-badge" data-testid="ysp-card-installs">
-                          {y('installCount', { n: card.installs })}
-                        </span>
-                      )}
                       <div className="ysp-card-actions">
                         <button
                           type="button"

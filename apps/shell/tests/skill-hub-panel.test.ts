@@ -274,7 +274,6 @@ describe('the get tab', () => {
     const versions = container.querySelectorAll('[data-testid="ysp-card-version"]')
     expect(versions.length).toBe(1)
     expect(versions[0]?.textContent).toBe(skillHubText('en', 'versionBadge', { version: '1.2.0' }))
-    expect(container.querySelector('[data-testid="ysp-card-installs"]')).toBeNull()
     // one footer per card holds publisher, version and the actions together
     const footers = container.querySelectorAll('.ysp-card-footer')
     expect(footers.length).toBe(3)

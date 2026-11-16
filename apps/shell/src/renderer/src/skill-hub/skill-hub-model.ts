@@ -2,9 +2,9 @@
  * The skills forest (Ieum Forest) home page without React: the GitHub address
  * the "get" tab builds from its owner/repo and optional path fields, and the
  * row and card views the two lists draw. Everything optional a skill carries
- * (version, provenance, install count) is read with safe optional access: the
- * skills service fills those fields in beside the shared views, and a view
- * without them shows nothing rather than a guess.
+ * (version, provenance) is read with safe optional access: the skills service
+ * fills those fields in beside the shared views, and a view without them shows
+ * nothing rather than a guess.
  */
 import type {
   UserSkillImportCandidateView,
@@ -29,7 +29,6 @@ export interface SkillHubSkillMeta {
 
 type WithMeta<T> = T & {
   version?: unknown
-  installs?: unknown
   publisher?: unknown
   provenance?: unknown
 }
@@ -112,25 +111,19 @@ export interface SkillHubCardView {
   publisher?: string | undefined
   /** the parsed front-matter version when the import reports one */
   version?: string | undefined
-  /** install count only when some source actually reports one */
-  installs?: number | undefined
 }
 
 function ownerOfRepo(repo: string): string | undefined {
   return shortText(repo.split('/')[0])
 }
 
-/** The card view of one found skill: publisher, version and installs only when known */
+/** The card view of one found skill: publisher and version only when known */
 export function skillHubCandidateCard(
   candidate: UserSkillImportCandidateView,
   origin: UserSkillImportPreview['origin'],
 ): SkillHubCardView {
   const meta = candidate as WithMeta<UserSkillImportCandidateView>
   const version = shortText(meta.version)
-  const installs =
-    typeof meta.installs === 'number' && Number.isFinite(meta.installs) && meta.installs >= 0
-      ? Math.floor(meta.installs)
-      : undefined
   const publisher =
     shortText(meta.publisher) ?? (origin.kind === 'github' ? ownerOfRepo(origin.repo) : undefined)
   return {
@@ -140,21 +133,17 @@ export function skillHubCandidateCard(
     description: candidate.description,
     ...(publisher ? { publisher } : {}),
     ...(version ? { version } : {}),
-    ...(installs !== undefined ? { installs } : {}),
   }
 }
 
 /** One row of the "my skills" list */
 export interface SkillHubRowView {
   id: string
-  name: string
   title: string
-  description: string
   enabled: boolean
   canRemove: boolean
   /** the provenance badge when the service records one; the source badge else */
   provenanceSource?: SkillHubProvenanceSource | undefined
-  provenanceUrl?: string | undefined
   version?: string | undefined
 }
 
@@ -165,13 +154,10 @@ export function skillHubInstalledRow(view: UserSkillView): SkillHubRowView {
   const version = shortText(meta.version)
   return {
     id: view.id,
-    name: view.name,
     title: skillDisplayTitle(view),
-    description: view.description,
     enabled: view.enabled,
     canRemove: view.can.remove,
     ...(provenance ? { provenanceSource: provenance.source } : {}),
-    ...(provenance?.sourceUrl ? { provenanceUrl: provenance.sourceUrl } : {}),
     ...(version ? { version } : {}),
   }
 }

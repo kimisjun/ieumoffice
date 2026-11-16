@@ -1,4 +1,5 @@
 import { aiVisible, useAppChoice, type AppChoiceSource } from '@genoffice/ui'
+import type { homeAiEntry } from './subscription-status'
 
 /**
  * Whether the home window shows its AI parts (editor choice spec 8.1): the
@@ -44,12 +45,11 @@ export function firstConnectionNoticeShown(input: FirstConnectionNoticeInput): b
 export const PROJECT_CHATS_TAB = 'chats'
 
 /**
- * The home AI entry's states (`homeAiEntry` in subscription-status.ts): the
- * same readiness the settings entry's line reports. The skills forest reads
- * the connection state from there and nowhere else.
+ * The home AI entry's states, as `homeAiEntry` in subscription-status.ts
+ * returns them: the same readiness the settings entry's line reports. The
+ * skills forest reads the connection state from there and nowhere else.
  */
-export type HomeAiEntryState =
-  'connected' | 'checking' | 'needs-connection' | 'off' | 'disconnected'
+export type HomeAiEntryState = ReturnType<typeof homeAiEntry>['state']
 
 /**
  * Whether the home screen offers the skills forest (Ieum Forest). It is an AI

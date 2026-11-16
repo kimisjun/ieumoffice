@@ -1,8 +1,8 @@
 /**
  * The skills forest (Ieum Forest) rules without a DOM: when the home screen
  * offers it, the GitHub address the "get" tab builds, and the card and row
- * views that show optional metadata (version, provenance, install count)
- * only when some source actually reports it.
+ * views that show optional metadata (version, provenance) only when some
+ * source actually reports it.
  */
 import { describe, expect, it } from 'vitest'
 import type {
@@ -89,7 +89,7 @@ describe('the GitHub address the get tab builds', () => {
 
 function candidate(
   key: string,
-  over: Partial<UserSkillImportCandidateView> & { version?: string; installs?: number } = {},
+  over: Partial<UserSkillImportCandidateView> & { version?: string } = {},
 ): UserSkillImportCandidateView {
   return {
     key,
@@ -133,21 +133,10 @@ describe('the cards of what was found', () => {
     })
   })
 
-  it('leaves version and install count out when nothing reports them', () => {
+  it('leaves version out when nothing reports it', () => {
     const card = skillHubCandidateCard(candidate('two'), githubOrigin)
     expect(card.version).toBeUndefined()
-    expect(card.installs).toBeUndefined()
     expect(card).not.toHaveProperty('version')
-  })
-
-  it('shows an install count only when one is actually known', () => {
-    const known = skillHubCandidateCard(candidate('three', { installs: 42 }), githubOrigin)
-    expect(known.installs).toBe(42)
-    const nonsense = skillHubCandidateCard(
-      candidate('four', { installs: Number.NaN }),
-      githubOrigin,
-    )
-    expect(nonsense.installs).toBeUndefined()
   })
 
   it('has no publisher outside a GitHub import', () => {
@@ -208,11 +197,9 @@ describe('the rows of installed skills', () => {
     expect(row).toMatchObject({
       id: 'app:one-skill',
       title: 'One Skill',
-      description: 'What it does.',
       enabled: true,
       canRemove: true,
       provenanceSource: 'official',
-      provenanceUrl: 'https://example.com',
       version: '2.0.0',
     })
   })

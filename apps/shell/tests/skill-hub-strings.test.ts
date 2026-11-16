@@ -47,7 +47,6 @@ const SAME_AS_ENGLISH: ReadonlyArray<readonly [Lang, string]> = [
   ['de', 'labelVersion'],
   ['de', 'versionBadge'],
   ['de', 'provCommunity'],
-  ['fr', 'labelDescription'],
   ['fr', 'labelVersion'],
   ['fr', 'versionBadge'],
   ['it', 'provCommunity'],
