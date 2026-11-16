@@ -49,6 +49,12 @@ describe('selection summary', () => {
     ).toBe('sheet First, topics: a, b: Beta')
   })
 
+  it('omits the sheet prefix for empty or whitespace-only sheet titles', () => {
+    for (const sheet of ['', ' \n ']) {
+      expect(summarize({ sheet, topics: [{ id: 'a', title: 'Alpha' }] })).toBe('topic a: Alpha')
+    }
+  })
+
   it('reports an empty selection', () => {
     expect(summarize({ none: true, sheet: 'First' })).toBe('nothing is selected')
     expect(summarize({ sheet: 'First', topics: [] })).toBe('nothing is selected')

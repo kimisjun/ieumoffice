@@ -30,7 +30,8 @@ export function summarize(result: Record<string, unknown>): string {
   if (Array.isArray(result.topics)) {
     const topics = result.topics as Array<{ id: string; title: string }>
     if (topics.length === 0) return 'nothing is selected'
-    const sheet = typeof result.sheet === 'string' ? `sheet ${preview(result.sheet)}, ` : ''
+    const sheetTitle = typeof result.sheet === 'string' ? preview(result.sheet) : ''
+    const sheet = sheetTitle ? `sheet ${sheetTitle}, ` : ''
     const selected = topics.slice(0, 3).map((topic) => {
       const title = preview(topic.title)
       return topic.id + (title ? `: ${title}` : '')
