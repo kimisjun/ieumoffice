@@ -82,6 +82,15 @@ describe('control server', () => {
     })
   })
 
+  it.each(['/ignored.docx', null, 42, { unexpected: true }])(
+    'discards an unnecessary open_documents path: %j',
+    (path) => {
+      expect(
+        parseEnvelope(JSON.stringify({ token: 't', request: { cmd: 'open_documents', path } })),
+      ).toEqual({ token: 't', request: { cmd: 'open_documents' } })
+    },
+  )
+
   it('passes an open_documents request through to the handler without a path', async () => {
     const userData = mkdtempSync(join(tmpdir(), 'genoffice-control-'))
     const seen: unknown[] = []

@@ -47,11 +47,14 @@ export function parseEnvelope(line: string): ControlEnvelope | null {
   const env = raw as Partial<ControlEnvelope>
   if (typeof env.token !== 'string' || !env.request || typeof env.request !== 'object') return null
   const req = env.request as { cmd?: string; path?: unknown }
-  // `open_documents` takes no path; every other command must name its file,
-  // and anything else is an unsupported command
+  // The listing is argument-free: discard any extra request fields.
+  if (req.cmd === 'open_documents') {
+    return { token: env.token, request: { cmd: 'open_documents' } }
+  }
+  // Every other command must name its file; unknown commands are unsupported.
   if (req.cmd === 'open' || req.cmd === 'selection') {
     if (typeof req.path !== 'string') return null
-  } else if (req.cmd !== 'open_documents') {
+  } else {
     return null
   }
   return env as ControlEnvelope
