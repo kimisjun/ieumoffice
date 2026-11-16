@@ -140,9 +140,14 @@ export function provenanceOfGitHub(
   commit: string,
   path: string,
 ): { source: SkillProvenanceSource; sourceUrl: string } {
-  const folder = path ? `/tree/${commit}/${path}` : `/tree/${commit}`
+  // every segment is URL-encoded on its own, so spaces, `#` and non-ASCII
+  // names stay one segment in the address instead of breaking it
+  const segment = (part: string) => encodeURIComponent(part)
+  const folder = path
+    ? `/tree/${segment(commit)}/${path.split('/').map(segment).join('/')}`
+    : `/tree/${segment(commit)}`
   return {
     source: repo === PRODUCT_REPO_SLUG ? 'official' : 'community',
-    sourceUrl: `https://github.com/${repo}${folder}`,
+    sourceUrl: `https://github.com/${repo.split('/').map(segment).join('/')}${folder}`,
   }
 }

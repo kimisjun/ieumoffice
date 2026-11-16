@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PRODUCT_REPO_SLUG } from '@genoffice/i18n'
 import type { SkillImport, SkillImportCandidate } from '@genoffice/ai-provider'
 import {
+  provenanceOfGitHub,
   readSkillProvenance,
   skillProvenanceFromSettings,
   skillVersionOf,
@@ -310,5 +311,24 @@ describe('skillProvenanceFromSettings', () => {
         },
       }),
     ).toEqual({ 'app:ok': { source: 'local', version: '1.0.0', at: '2026-11-16T00:00:00Z' } })
+  })
+})
+
+describe('provenanceOfGitHub', () => {
+  it('URL-encodes every segment of repo, commit and path', () => {
+    const { source, sourceUrl } = provenanceOfGitHub(
+      'someone/skill z',
+      'abc 123',
+      'skills/meeting notes/週次 レポート/notes#1',
+    )
+    expect(source).toBe('community')
+    expect(sourceUrl).toBe(
+      'https://github.com/someone/skill%20z/tree/abc%20123/' +
+        'skills/meeting%20notes/%E9%80%B1%E6%AC%A1%20%E3%83%AC%E3%83%9D%E3%83%BC%E3%83%88/notes%231',
+    )
+    // an ordinary address keeps its readable shape
+    expect(provenanceOfGitHub('someone/skillz', 'a'.repeat(40), 'skills/demo').sourceUrl).toBe(
+      `https://github.com/someone/skillz/tree/${'a'.repeat(40)}/skills/demo`,
+    )
   })
 })
