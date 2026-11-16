@@ -1168,12 +1168,9 @@ export function Home({
     if (!aiOn) setAskMode(false)
   }, [aiOn])
   // the skills forest (Ieum Forest) takes over the content area the same way;
-  // its entry and page go away with AI off and while the connection state
-  // reads "connection needed" (the readiness `homeAiEntry` reports)
-  const skillHubOffered = skillHubAvailable(
-    aiOn,
-    homeAiEntry(aiSettings, connection.statuses).state,
-  )
+  // its entry and page go away only with the AI master toggle off — the
+  // connection state never hides it (the owner may run AI through MCP alone)
+  const skillHubOffered = skillHubAvailable(aiOn)
   const [skillHubMode, setSkillHubMode] = useState(false)
   useEffect(() => {
     if (!skillHubOffered) setSkillHubMode(false)
@@ -3538,7 +3535,7 @@ export function Home({
             </button>
           ) : null}
           {/* the skills forest (Ieum Forest) below the agent entry: an AI
-              part, hidden with AI off and while the connection reads needed */}
+              part, hidden only with the AI master toggle off */}
           {skillHubOffered && (
             <button
               className={`nav-item${activeNav === 'skillHub' ? ' active' : ''}`}

@@ -1,5 +1,4 @@
 import { aiVisible, useAppChoice, type AppChoiceSource } from '@genoffice/ui'
-import type { homeAiEntry } from './subscription-status'
 
 /**
  * Whether the home window shows its AI parts (editor choice spec 8.1): the
@@ -45,23 +44,17 @@ export function firstConnectionNoticeShown(input: FirstConnectionNoticeInput): b
 export const PROJECT_CHATS_TAB = 'chats'
 
 /**
- * The home AI entry's states, as `homeAiEntry` in subscription-status.ts
- * returns them: the same readiness the settings entry's line reports. The
- * skills forest reads the connection state from there and nowhere else.
- */
-export type HomeAiEntryState = ReturnType<typeof homeAiEntry>['state']
-
-/**
  * Whether the home screen offers the skills forest (Ieum Forest). It is an AI
- * part,
- * so it goes away with AI turned off, and it goes away while the connection
- * state reads "connection needed" (`needs-connection`): the provider the
- * person selected cannot run and has no fallback, so nothing in it could be
- * used. Any other state — connected, still checking, or nothing connected
- * yet — leaves the entry and the page up, as the ask panel stays up.
+ * part, so it goes away only with the AI master toggle off (Settings ->
+ * Editors and AI, "AI features"). The connection state never hides it: the
+ * entry shows whenever the master toggle is on, whether or not an AI account
+ * is registered or connected — an owner may run AI through MCP alone, and the
+ * settings note itself says terminal commands and MCP keep working with AI
+ * off. "Connection needed" or "disconnected" on the settings entry does not
+ * take the entry away.
  */
-export function skillHubAvailable(aiOn: boolean, entryState: HomeAiEntryState): boolean {
-  return aiOn && entryState !== 'needs-connection'
+export function skillHubAvailable(aiOn: boolean): boolean {
+  return aiOn
 }
 
 /** The project screen's tabs as shown: no chats while AI is off */

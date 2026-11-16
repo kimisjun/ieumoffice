@@ -10,7 +10,7 @@ import type {
   UserSkillImportPreview,
   UserSkillView,
 } from '@genoffice/electron-utils/user-skills-channels'
-import { skillHubAvailable, type HomeAiEntryState } from '../src/renderer/src/ai-features'
+import { skillHubAvailable } from '../src/renderer/src/ai-features'
 import {
   buildSkillImportAddress,
   skillHubCandidateCard,
@@ -19,28 +19,14 @@ import {
 } from '../src/renderer/src/skill-hub/skill-hub-model'
 
 describe('whether the home screen offers the skills forest', () => {
-  const states: HomeAiEntryState[] = [
-    'connected',
-    'checking',
-    'needs-connection',
-    'off',
-    'disconnected',
-  ]
-
-  it('hides with AI off, whatever the connection state says', () => {
-    for (const state of states) {
-      expect(skillHubAvailable(false, state), state).toBe(false)
-    }
+  it('hides only with the AI master toggle off', () => {
+    expect(skillHubAvailable(false)).toBe(false)
   })
 
-  it('hides while the connection state reads "connection needed"', () => {
-    expect(skillHubAvailable(true, 'needs-connection')).toBe(false)
-  })
-
-  it('stays up for every other connection state', () => {
-    for (const state of states.filter((s) => s !== 'needs-connection')) {
-      expect(skillHubAvailable(true, state), state).toBe(true)
-    }
+  it('stays up with the AI master toggle on, whatever the connection state says', () => {
+    // the entry keys on the master toggle alone: an owner running AI through
+    // MCP never registers an in-app account, and that must not hide the entry
+    expect(skillHubAvailable(true)).toBe(true)
   })
 })
 

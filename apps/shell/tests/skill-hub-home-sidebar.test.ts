@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 /**
  * The skills forest (Ieum Forest) entry on the home sidebar and its page: it
- * sits below the agent entry, it hides with AI off and while the connection
- * state reads "connection needed" (the readiness `homeAiEntry` reports on the
- * settings entry), and the page falls back to the file list the moment AI
- * becomes unavailable.
+ * sits below the agent entry, it shows whenever the AI master toggle is on —
+ * whatever the connection state says (no registered AI account must not hide
+ * it) — and the entry and page fall back to the file list only when the
+ * master toggle is turned off.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, createElement } from 'react'
@@ -173,11 +173,11 @@ describe('the skills forest sidebar entry', () => {
     expect(nav('home-skill-hub-nav')).toBeNull()
   })
 
-  it('is not there while the connection state reads "connection needed"', async () => {
-    // the readiness the entry reports is the one that hides the page
+  it('stays while the connection state reads "connection needed"', async () => {
+    // a provider that cannot run must not hide the entry: only the AI master toggle does
     expect(homeAiEntry(needConnectionSettings, emptyStatuses).state).toBe('needs-connection')
     await render({ aiFeatures: true, settings: needConnectionSettings, statuses: emptyStatuses })
-    expect(nav('home-skill-hub-nav')).toBeNull()
+    expect(nav('home-skill-hub-nav')).not.toBeNull()
   })
 
   it('stays while the connection is still checking or simply not connected', async () => {
@@ -186,15 +186,14 @@ describe('the skills forest sidebar entry', () => {
     expect(nav('home-skill-hub-nav')).not.toBeNull()
   })
 
-  it('takes the page away when the connection turns to "needed" while it is open', async () => {
+  it('keeps the page up when the connection turns to "needed" while it is open', async () => {
     await render({ aiFeatures: true, settings: defaultAiSettings(), statuses: connectedStatuses })
     await act(async () => nav('home-skill-hub-nav')!.click())
     expect(container.querySelector('[data-testid="ysp-page"]')).not.toBeNull()
-    // the person picks a provider that cannot run: the page falls back to the file list
+    // the person picks a provider that cannot run: the page stays, keyed on the master toggle
     await render({ aiFeatures: true, settings: needConnectionSettings, statuses: emptyStatuses })
-    expect(container.querySelector('[data-testid="ysp-page"]')).toBeNull()
-    expect(container.querySelector('.content')?.textContent).toContain('brief.docx')
-    expect(nav('home-skill-hub-nav')).toBeNull()
+    expect(container.querySelector('[data-testid="ysp-page"]')).not.toBeNull()
+    expect(nav('home-skill-hub-nav')).not.toBeNull()
   })
 
   it('takes the page away when AI is turned off while it is open', async () => {
