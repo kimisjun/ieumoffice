@@ -163,7 +163,15 @@ function registerSkillResources(server: McpServer, ctx: McpContext): void {
     },
     async (uri, vars) => {
       const skills = await appliedSkills(ctx.env)
-      const wanted = decodeURIComponent(String(vars.name ?? ''))
+      const raw = String(vars.name ?? '')
+      let wanted: string
+      try {
+        wanted = decodeURIComponent(raw)
+      } catch {
+        // a malformed escape (ieumoffice://skills/%zz) cannot name a skill;
+        // fall through with the raw name so the unknown-skill error explains it
+        wanted = raw
+      }
       const skill = findAppliedSkill(skills, wanted)
       if (!skill) {
         const names = skills.map((s) => s.name).join(', ') || '(none)'
@@ -172,11 +180,15 @@ function registerSkillResources(server: McpServer, ctx: McpContext): void {
           `unknown skill: ${wanted}; applied skills: ${names}`,
         )
       }
-      const text = await skillMdOf(skill)
-      if (text === undefined) {
+      const md = await skillMdOf(skill)
+      if (md.kind === 'broken') {
+        // distinct from a missing SKILL.md: the folder exists but cannot be read
+        throw new McpError(ErrorCode.InternalError, `cannot read the skill folder: ${skill.dir}`)
+      }
+      if (md.kind === 'missing') {
         throw new McpError(ErrorCode.InvalidParams, `skill ${skill.name} has no SKILL.md`)
       }
-      return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text }] }
+      return { contents: [{ uri: uri.href, mimeType: 'text/markdown', text: md.text }] }
     },
   )
 }
