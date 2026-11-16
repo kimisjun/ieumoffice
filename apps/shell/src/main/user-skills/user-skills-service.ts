@@ -220,6 +220,16 @@ function installCheckError(reason: SkillInstallCheckReason): SkillImportError {
   return new SkillImportError(kind, `The skill folder is refused: ${reason}`)
 }
 
+/**
+ * The install gate again, on a staged copy right before it is swapped in: the
+ * gate above runs on the source folder before the copy, and anything changed
+ * in between must not land (decision 0152). Cheap: one folder walk.
+ */
+async function gateStagedCopy(dir: string): Promise<void> {
+  const checked = await checkSkillInstallDir(dir)
+  if (!checked.ok) throw installCheckError(checked.reason)
+}
+
 function sameName(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase()
 }
@@ -787,9 +797,11 @@ export function createUserSkillsService(deps: UserSkillsServiceDeps) {
     if (!checked.ok) throw installCheckError(checked.reason)
     const undoKept = await keepVersions(replaceDirs, name, 'replace')
     try {
-      await commitSkillInstall(appSkillsDir(), [
-        { candidate: stagedCandidate(work, name), folderName: name, replaceDirs },
-      ])
+      await commitSkillInstall(
+        appSkillsDir(),
+        [{ candidate: stagedCandidate(work, name), folderName: name, replaceDirs }],
+        { validateStaged: gateStagedCopy },
+      )
     } catch (error) {
       await undoKept()
       throw error
@@ -1251,6 +1263,7 @@ export function createUserSkillsService(deps: UserSkillsServiceDeps) {
             appSkillsDir: appSkillsDir(),
             selected: request.selected,
             onCollision: request.onCollision,
+            validateStaged: gateStagedCopy,
           })
         } catch (error) {
           for (const undo of undoKept) await undo()
@@ -1391,6 +1404,7 @@ export function createUserSkillsService(deps: UserSkillsServiceDeps) {
           done = await applyGitHubSkillUpdate(check, {
             appSkillsDir: appSkillsDir(),
             skillDir: dir,
+            validateStaged: gateStagedCopy,
           })
         } catch (error) {
           await undoKept()

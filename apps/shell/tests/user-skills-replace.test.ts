@@ -7,6 +7,7 @@ import {
   createUserSkillsService,
   type UserSkillsService,
 } from '../src/main/user-skills/user-skills-service'
+import { readSkillProvenance } from '../src/main/user-skills/skill-provenance'
 
 /**
  * What stays when another version takes an own skill's place (decision 0127):
@@ -196,5 +197,32 @@ describe('a GitHub update', () => {
     const check = await changedCheck(incoming({ deck: skillMd('deck-two') }))
     expect(await service.applyUpdate('app:deck', check)).toEqual({ ok: true, id: 'app:deck-two' })
     expect(await viewOf('app:deck-two')).toMatchObject({ invoke: 'manual', editors: ['slides'] })
+    // the ledger identifier is the one the folder resolves to, never a
+    // stranded one: the record moves with the rename
+    const ledger = readSkillProvenance(join(root, 'app-settings.json'))
+    expect(ledger['app:deck']).toBeUndefined()
+    expect(ledger['app:deck-two']).toMatchObject({
+      source: 'community',
+      sourceUrl: `https://github.com/owner/repo/tree/${'b'.repeat(40)}`,
+    })
+  })
+
+  it('refuses an update candidate renamed to a reserved name and keeps its state', async () => {
+    await installAll(incoming({ deck: skillMd('deck') }))
+    await service.setState('app:deck', { enabled: false, invoke: 'manual' })
+
+    const check = await changedCheck(incoming({ deck: skillMd('deck-two') }))
+    // a reserved name must be refused wherever it reaches the apply gate
+    check.update.candidates[0]!.name = 'genoffice'
+    expect(await service.applyUpdate('app:deck', check)).toEqual({
+      ok: false,
+      reason: 'not-installable',
+    })
+
+    // state stays intact: folder, saved state and ledger are as they were
+    expect(installedText('deck')).toContain('name: deck')
+    expect(await viewOf('app:deck')).toMatchObject({ enabled: false, invoke: 'manual' })
+    expect(await viewOf('app:genoffice')).toBeUndefined()
+    expect(Object.keys(readSkillProvenance(join(root, 'app-settings.json')))).toEqual(['app:deck'])
   })
 })

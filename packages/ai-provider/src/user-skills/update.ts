@@ -30,6 +30,7 @@ import {
   type InstalledSkill,
   type SkillImport,
 } from './import'
+import { isReservedUserSkillName } from './names'
 import { readIeumSourceRecord, type IeumSourceRecord } from './source-record'
 
 /** One file that differs between the installed skill and the new one */
@@ -216,7 +217,12 @@ export async function applyGitHubSkillUpdate(
     if (candidate.problem === 'too-large') {
       throw new SkillImportError('too-large', `${candidate.name} is too large`)
     }
-    if (candidate.problem) {
+    // the same refusal `installImportedSkills` has: a reserved name must never
+    // reach the app's skills folder or the ledger, whatever a check carried in.
+    // A refused name keeps the folder basename and its ledger identifier one
+    // and the same: only a name the installed folder resolves to can be
+    // written, so settings and provenance always follow a real skill.
+    if (candidate.problem || isReservedUserSkillName(candidate.name)) {
       throw new SkillImportError('not-installable', `${candidate.name} cannot be installed`)
     }
     const folderName = basename(options.skillDir)

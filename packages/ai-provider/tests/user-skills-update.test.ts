@@ -14,6 +14,8 @@ import {
   SkillImportError,
   applyGitHubSkillUpdate,
   checkGitHubSkillUpdate,
+  commitSkillInstall,
+  describeSkillCandidate,
   disposeSkillImport,
   installImportedSkills,
   parseSkillMd,
@@ -288,5 +290,61 @@ describe('checkGitHubSkillUpdate', () => {
         }),
       ),
     ).toBe('invalid-source')
+  })
+})
+
+describe('applyGitHubSkillUpdate', () => {
+  it('refuses an update candidate renamed to a reserved name and keeps the skill as it was', async () => {
+    const head = { commit: SHA1 }
+    const { app, tmp, skillDir, github } = await installed(head, {
+      [SHA1]: V1,
+      [SHA2]: { 'skills/minutes/SKILL.md': skillMd('Better minutes') },
+    })
+    head.commit = SHA2
+    const check = await checkGitHubSkillUpdate({
+      skillDir,
+      appSkillsDir: app,
+      fetch: github.fetch,
+      tempDir: tmp,
+    })
+    expect(check.status).toBe('changed')
+    if (check.status !== 'changed') return
+    // whatever an earlier stage let through, the apply gate refuses a
+    // reserved name: no reserved id may reach the folder or the ledger
+    check.update.candidates[0]!.name = 'genoffice'
+    expect(await kindOf(applyGitHubSkillUpdate(check, { appSkillsDir: app, skillDir }))).toBe(
+      'not-installable',
+    )
+    // state intact: the folder, its listing and its source record are as before
+    expect(readdirSync(app)).toEqual(['minutes'])
+    expect(readFileSync(join(skillDir, 'SKILL.md'), 'utf8')).toContain('Meeting minutes')
+    expect((await readIeumSourceRecord(skillDir))?.commit).toBe(SHA1)
+    expect(readdirSync(tmp)).toEqual([])
+  })
+})
+
+describe('commitSkillInstall', () => {
+  it('checks the staged copy that lands and swaps nothing when the re-check refuses', async () => {
+    const base = temp()
+    const app = join(base, 'skills')
+    const source = join(base, 'source')
+    mkdirSync(source, { recursive: true })
+    writeFileSync(join(source, 'SKILL.md'), skillMd('Meeting minutes'))
+    const candidate = (await describeSkillCandidate(source, 'minutes', new Map()))!
+    const checked: string[] = []
+    await expect(
+      commitSkillInstall(app, [{ candidate, folderName: 'minutes', replaceDirs: [] }], {
+        validateStaged: async (dir) => {
+          checked.push(dir)
+          throw new SkillImportError('not-installable', 'The staged copy is refused')
+        },
+      }),
+    ).rejects.toMatchObject({ kind: 'not-installable' })
+    // the copy inside the app's own staging folder was the one checked
+    expect(checked).toHaveLength(1)
+    expect(checked[0]).not.toBe(source)
+    expect(checked[0]!.startsWith(app)).toBe(true)
+    expect(readdirSync(app)).toEqual([])
+    expect(readFileSync(join(source, 'SKILL.md'), 'utf8')).toContain('Meeting minutes')
   })
 })

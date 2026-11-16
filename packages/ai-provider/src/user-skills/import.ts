@@ -725,6 +725,13 @@ export interface CommitSkillInstallOptions {
   discardReplaced?: ((dir: string) => Promise<void>) | undefined
   limits?: SkillFolderLimits | undefined
   random?: (() => string) | undefined
+  /**
+   * Run on each staged copy right before the final swap, after the folder is
+   * copied into the private staging folder. A gate that ran on the source
+   * folder earlier (gate-then-copy) can be evaded by changing the source in
+   * between; re-checking the copy that actually lands closes that window.
+   */
+  validateStaged?: ((dir: string) => Promise<void>) | undefined
 }
 
 /**
@@ -771,6 +778,8 @@ export async function commitSkillInstall(
         }
         await writeFile(join(dir, IEUM_SOURCE_FILE), renderIeumSourceRecord(record))
       }
+      // the copy that lands is the one checked, immediately before the swap
+      await options.validateStaged?.(dir)
       staged.push(dir)
     }
     for (const [index, plan] of plans.entries()) {
