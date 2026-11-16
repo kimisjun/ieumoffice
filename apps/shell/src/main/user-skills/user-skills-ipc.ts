@@ -368,8 +368,11 @@ export function registerUserSkillsIpc(deps: UserSkillsIpcDeps): UserSkillsIpc {
       return { ok: false, reason: 'not-found' } as UserSkillsFail
     }
     const done = await service.install(entry.value, request)
-    // a name choice still missing keeps the preview open for the person to answer
-    if (done.ok || done.reason !== 'needs-choice') {
+    // the preview stays open for a missing name choice, and for a kept one so
+    // the next card of the same search installs from it; anything else is
+    // settled and the import is dropped
+    const settled = done.ok ? request.keep !== true : done.reason !== 'needs-choice'
+    if (settled) {
       imports.delete(request.token)
       await service.dispose(entry.value)
     }

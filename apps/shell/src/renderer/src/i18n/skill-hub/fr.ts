@@ -16,6 +16,7 @@ export const fr = {
   finding: 'Récupération depuis GitHub…',
   previewAction: 'Aperçu',
   installAction: 'Installer',
+  installedAction: 'Installé',
   labelName: 'Nom',
   labelDescription: 'Description',
   labelVersion: 'Version',

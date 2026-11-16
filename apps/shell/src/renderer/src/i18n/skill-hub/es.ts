@@ -15,6 +15,7 @@ export const es = {
   finding: 'Descargando de GitHub…',
   previewAction: 'Vista previa',
   installAction: 'Instalar',
+  installedAction: 'Instalado',
   labelName: 'Nombre',
   labelDescription: 'Descripción',
   labelVersion: 'Versión',

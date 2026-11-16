@@ -16,6 +16,7 @@ export const ms = {
   finding: 'Mengambil dari GitHub…',
   previewAction: 'Pratonton',
   installAction: 'Pasang',
+  installedAction: 'Dipasang',
   labelName: 'Nama',
   labelDescription: 'Penerangan',
   labelVersion: 'Versi',

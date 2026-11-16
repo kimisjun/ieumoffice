@@ -15,6 +15,7 @@ export const en = {
   finding: 'Fetching from GitHub…',
   previewAction: 'Preview',
   installAction: 'Install',
+  installedAction: 'Installed',
   labelName: 'Name',
   labelDescription: 'Description',
   labelVersion: 'Version',

@@ -15,6 +15,7 @@ export const ko = {
   finding: 'GitHub에서 가져오는 중…',
   previewAction: '미리보기',
   installAction: '설치',
+  installedAction: '설치됨',
   labelName: '이름',
   labelDescription: '설명',
   labelVersion: '버전',

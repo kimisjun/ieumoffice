@@ -15,6 +15,7 @@ export const id = {
   finding: 'Mengambil dari GitHub…',
   previewAction: 'Pratinjau',
   installAction: 'Pasang',
+  installedAction: 'Terpasang',
   labelName: 'Nama',
   labelDescription: 'Deskripsi',
   labelVersion: 'Versi',

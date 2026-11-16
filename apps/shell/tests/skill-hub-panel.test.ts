@@ -24,7 +24,7 @@ let container: HTMLDivElement
 let api: SkillHubApi
 let removed: string[]
 type StateChange = [string, { enabled?: boolean }]
-type InstallCall = [string, string[], Record<string, string> | undefined]
+type InstallCall = [string, string[], Record<string, string> | undefined, boolean | undefined]
 type ReadCall = [string, string]
 let stateChanges: StateChange[]
 let importAddresses: string[]
@@ -149,8 +149,13 @@ beforeEach(() => {
       readCalls.push([token, key])
       return { ok: true, content: importContent }
     },
-    install: async (token: string, selected: string[], onCollision?: Record<string, string>) => {
-      installCalls.push([token, selected, onCollision as Record<string, string> | undefined])
+    install: async (
+      token: string,
+      selected: string[],
+      onCollision?: Record<string, string>,
+      keep?: boolean,
+    ) => {
+      installCalls.push([token, selected, onCollision as Record<string, string> | undefined, keep])
       return {
         ok: true,
         installed: selected.map((key) => ({ key, id: `app:${key}` })),
@@ -222,6 +227,33 @@ describe('the skills forest page', () => {
     expect(container.querySelector('.ysp-rows')).toBeNull()
     expect(text()).not.toContain(skillHubText('en', 'getIntro'))
   })
+
+  it('wires each tab to its panel and moves along the strip with the arrow keys', async () => {
+    await render()
+    const get = container.querySelector<HTMLButtonElement>('[data-testid="ysp-tab-get"]')!
+    expect(get.id).toBe('ysp-tabbtn-get')
+    expect(get.getAttribute('aria-controls')).toBe('ysp-panel-get')
+    const panel = container.querySelector('[role="tabpanel"]')!
+    expect(panel.id).toBe('ysp-panel-get')
+    expect(panel.getAttribute('aria-labelledby')).toBe('ysp-tabbtn-get')
+    await act(async () => {
+      get.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+    })
+    expect(
+      container.querySelector('[data-testid="ysp-tab-mine"]')?.getAttribute('aria-selected'),
+    ).toBe('true')
+    expect(container.querySelector('[role="tabpanel"]')?.id).toBe('ysp-panel-mine')
+    expect(container.querySelector('[role="tabpanel"]')?.getAttribute('aria-labelledby')).toBe(
+      'ysp-tabbtn-mine',
+    )
+    expect(document.activeElement?.id).toBe('ysp-tabbtn-mine')
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="ysp-tab-mine"]')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))
+    })
+    expect(container.querySelector('[role="tabpanel"]')?.id).toBe('ysp-panel-get')
+  })
 })
 
 describe('the get tab', () => {
@@ -243,6 +275,15 @@ describe('the get tab', () => {
     expect(versions.length).toBe(1)
     expect(versions[0]?.textContent).toBe(skillHubText('en', 'versionBadge', { version: '1.2.0' }))
     expect(container.querySelector('[data-testid="ysp-card-installs"]')).toBeNull()
+    // one footer per card holds publisher, version and the actions together
+    const footers = container.querySelectorAll('.ysp-card-footer')
+    expect(footers.length).toBe(3)
+    const footer = container.querySelector('.ysp-card[data-key="one"] .ysp-card-footer')!
+    expect(footer.querySelector('[data-testid="ysp-card-publisher"]')?.textContent).toBe('octocat')
+    expect(footer.querySelector('[data-testid="ysp-card-version"]')).not.toBeNull()
+    expect(
+      footer.querySelector('.ysp-card-actions [data-testid="ysp-card-install"]'),
+    ).not.toBeNull()
     // the standing safety warning under every preview
     expect(container.querySelector('.skl-preview-warning')?.textContent).toBe(
       skillsText('en', 'previewWarning'),
@@ -269,24 +310,41 @@ describe('the get tab', () => {
     expect(readCalls).toEqual([['tok-1', 'one']])
     const detail = container.querySelector('[data-testid="ysp-detail"]')!
     expect(detail.querySelector('[data-testid="ysp-detail-name"]')?.textContent).toBe('one-skill')
-    expect(detail.querySelector('[data-testid="ysp-detail-description"]')?.textContent).toBe(
-      'What one does for the person and the AI.',
-    )
+    // the card already carries the description: the detail does not repeat it
+    expect(detail.querySelector('[data-testid="ysp-detail-description"]')).toBeNull()
     expect(detail.querySelector('[data-testid="ysp-detail-version"]')?.textContent).toBe('1.2.0')
     expect(detail.querySelector('[data-testid="ysp-detail-body"]')?.textContent).toContain(
       'Ask for a meeting summary.',
     )
   })
 
-  it('installs one skill and says how many went in', async () => {
+  it('keeps the result list after installing and marks the installed card', async () => {
     await render()
     await type('[data-testid="ysp-repo"]', 'octocat/skills')
     await click('[data-testid="ysp-find"]')
     await click('.ysp-card[data-key="one"] [data-testid="ysp-card-install"]')
-    expect(installCalls).toEqual([['tok-1', ['one'], {}]])
+    expect(installCalls).toEqual([['tok-1', ['one'], {}, true]])
     expect(container.querySelector('[data-testid="ysp-notice"]')?.textContent).toBe(
       skillsText('en', 'installed', { n: 1 }),
     )
+    // the list stays: the installed card shows its state instead of Install
+    expect(container.querySelectorAll('.ysp-card')).toHaveLength(3)
+    const one = container.querySelector('.ysp-card[data-key="one"]')!
+    expect(one.querySelector('[data-testid="ysp-card-installed"]')?.textContent).toBe(
+      skillHubText('en', 'installedAction'),
+    )
+    expect(one.querySelector('[data-testid="ysp-card-install"]')).toBeNull()
+    expect(
+      container.querySelector('.ysp-card[data-key="two"] [data-testid="ysp-card-install"]'),
+    ).not.toBeNull()
+    // a second card installs from the same search
+    await click('.ysp-card[data-key="two"] .ysp-choice')
+    await click('.ysp-card[data-key="two"] [data-testid="ysp-card-install"]')
+    expect(installCalls).toEqual([
+      ['tok-1', ['one'], {}, true],
+      ['tok-1', ['two'], { two: 'replace' }, true],
+    ])
+    expect(container.querySelectorAll('[data-testid="ysp-card-installed"]')).toHaveLength(2)
   })
 
   it('wants a replace-or-skip answer before installing over a taken name', async () => {
@@ -300,7 +358,7 @@ describe('the get tab', () => {
     )
     await click('.ysp-card[data-key="two"] .ysp-choice')
     await click('.ysp-card[data-key="two"] [data-testid="ysp-card-install"]')
-    expect(installCalls).toEqual([['tok-1', ['two'], { two: 'replace' }]])
+    expect(installCalls).toEqual([['tok-1', ['two'], { two: 'replace' }, true]])
   })
 
   it('never offers installing a skill that cannot be installed', async () => {

@@ -15,6 +15,7 @@ export const zhTW = {
   finding: '正在從 GitHub 取得…',
   previewAction: '預覽',
   installAction: '安裝',
+  installedAction: '已安裝',
   labelName: '名稱',
   labelDescription: '說明',
   labelVersion: '版本',

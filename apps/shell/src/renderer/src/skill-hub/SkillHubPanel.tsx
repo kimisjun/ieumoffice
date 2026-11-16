@@ -103,8 +103,6 @@ function SkillHubPreviewDetail({
       <dl className="ysp-fields">
         <dt>{y('labelName')}</dt>
         <dd data-testid="ysp-detail-name">{card.name}</dd>
-        <dt>{y('labelDescription')}</dt>
-        <dd data-testid="ysp-detail-description">{card.description}</dd>
         {card.version && (
           <>
             <dt>{y('labelVersion')}</dt>
@@ -178,6 +176,8 @@ function SkillHubGetTab({ api, lang, locale }: { api: SkillHubApi; lang: Lang; l
   const [expanded, setExpanded] = useState<string | null>(null)
   const [choices, setChoices] = useState<Record<string, UserSkillCollisionChoice>>({})
   const [installing, setInstalling] = useState<string | null>(null)
+  /** candidates this preview installed, kept marked so more can go in from one search */
+  const [installed, setInstalled] = useState<Record<string, boolean>>({})
   const live = useRef({ running: false, closed: false, token: null as string | null })
 
   // closing the page (or refinding) drops the fetched preview; the main
@@ -205,6 +205,7 @@ function SkillHubGetTab({ api, lang, locale }: { api: SkillHubApi; lang: Lang; l
     setNotice(null)
     setExpanded(null)
     setChoices({})
+    setInstalled({})
     setSearch('')
     const oldToken = live.current.token
     live.current.token = null
@@ -242,16 +243,16 @@ function SkillHubGetTab({ api, lang, locale }: { api: SkillHubApi; lang: Lang; l
     }
     setInstalling(candidate.key)
     setErrorKey(null)
+    // `keep` leaves the previewed import alive so the next card of the same
+    // search can be installed; closing the page cancels it as before
     const answer = await api
-      .install(current.token, [candidate.key], onCollision)
+      .install(current.token, [candidate.key], onCollision, true)
       .catch(() => ({ ok: false as const, reason: 'failed' as const }))
     if (live.current.closed) return
     setInstalling(null)
-    if (answer.ok || answer.reason !== 'needs-choice') {
-      live.current.token = null
-      setPreview(null)
-    }
     if (answer.ok) {
+      // the list stays: the installed card is marked, not taken away
+      setInstalled((was) => ({ ...was, [candidate.key]: true }))
       setNotice(s('installed', { n: answer.installed.length }))
       return
     }
@@ -259,6 +260,9 @@ function SkillHubGetTab({ api, lang, locale }: { api: SkillHubApi; lang: Lang; l
       setErrorKey('chooseCollision')
       return
     }
+    // any other refusal expires the preview (the import is dropped with it)
+    live.current.token = null
+    setPreview(null)
     setErrorKey(failureKey(answer.reason, 'import') ?? 'failGeneric')
   }
 
@@ -355,23 +359,6 @@ function SkillHubGetTab({ api, lang, locale }: { api: SkillHubApi; lang: Lang; l
                         {card.description}
                       </p>
                     )}
-                    <div className="ysp-badges">
-                      {card.publisher && (
-                        <span className="ysp-badge" data-testid="ysp-card-publisher">
-                          {card.publisher}
-                        </span>
-                      )}
-                      {card.version && (
-                        <span className="ysp-badge" data-testid="ysp-card-version">
-                          {y('versionBadge', { version: card.version })}
-                        </span>
-                      )}
-                      {card.installs !== undefined && (
-                        <span className="ysp-badge" data-testid="ysp-card-installs">
-                          {y('installCount', { n: card.installs })}
-                        </span>
-                      )}
-                    </div>
                     {candidate.problem && (
                       <div className="ysp-error">
                         {candidate.problem === 'duplicate'
@@ -397,27 +384,50 @@ function SkillHubGetTab({ api, lang, locale }: { api: SkillHubApi; lang: Lang; l
                         ))}
                       </div>
                     )}
-                    <div className="ysp-card-actions">
-                      <button
-                        type="button"
-                        className="set-btn"
-                        data-testid="ysp-card-preview"
-                        aria-expanded={expanded === candidate.key}
-                        onClick={() =>
-                          setExpanded((was) => (was === candidate.key ? null : candidate.key))
-                        }
-                      >
-                        {expanded === candidate.key ? s('close') : y('previewAction')}
-                      </button>
-                      <button
-                        type="button"
-                        className="set-btn primary"
-                        data-testid="ysp-card-install"
-                        disabled={!!candidate.problem || busy || installing !== null}
-                        onClick={() => void install(candidate)}
-                      >
-                        {y('installAction')}
-                      </button>
+                    <div className="ysp-card-footer">
+                      {card.publisher && (
+                        <span className="ysp-badge" data-testid="ysp-card-publisher">
+                          {card.publisher}
+                        </span>
+                      )}
+                      {card.version && (
+                        <span className="ysp-badge" data-testid="ysp-card-version">
+                          {y('versionBadge', { version: card.version })}
+                        </span>
+                      )}
+                      {card.installs !== undefined && (
+                        <span className="ysp-badge" data-testid="ysp-card-installs">
+                          {y('installCount', { n: card.installs })}
+                        </span>
+                      )}
+                      <div className="ysp-card-actions">
+                        <button
+                          type="button"
+                          className="set-btn"
+                          data-testid="ysp-card-preview"
+                          aria-expanded={expanded === candidate.key}
+                          onClick={() =>
+                            setExpanded((was) => (was === candidate.key ? null : candidate.key))
+                          }
+                        >
+                          {expanded === candidate.key ? s('close') : y('previewAction')}
+                        </button>
+                        {installed[candidate.key] ? (
+                          <span className="ysp-badge" data-testid="ysp-card-installed">
+                            {y('installedAction')}
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="set-btn primary"
+                            data-testid="ysp-card-install"
+                            disabled={!!candidate.problem || busy || installing !== null}
+                            onClick={() => void install(candidate)}
+                          >
+                            {y('installAction')}
+                          </button>
+                        )}
+                      </div>
                     </div>
                     {expanded === candidate.key && (
                       <SkillHubPreviewDetail
@@ -634,6 +644,13 @@ export function SkillHubPanel({
     skillHubText(lang, key, params)
   const [tab, setTab] = useState<SkillHubTab>('get')
   const api = apiProp ?? userSkillsApi()
+  // left/right arrows move along the tab strip, as a tablist is expected to
+  const moveTab = (from: SkillHubTab, step: 1 | -1, target: EventTarget & HTMLButtonElement) => {
+    const index = SKILL_HUB_TABS.indexOf(from)
+    const next = SKILL_HUB_TABS[(index + step + SKILL_HUB_TABS.length) % SKILL_HUB_TABS.length]!
+    setTab(next)
+    target.ownerDocument.getElementById(`ysp-tabbtn-${next}`)?.focus()
+  }
   return (
     <main className="content ysp" data-testid="ysp-page">
       <header className="ysp-head">
@@ -642,31 +659,50 @@ export function SkillHubPanel({
           {SKILL_HUB_TABS.map((id) => (
             <button
               key={id}
+              id={`ysp-tabbtn-${id}`}
               type="button"
               role="tab"
               className={`ysp-tab-btn${tab === id ? ' active' : ''}`}
               aria-selected={tab === id}
+              aria-controls={`ysp-panel-${id}`}
+              tabIndex={tab === id ? 0 : -1}
               data-testid={`ysp-tab-${id}`}
               onClick={() => setTab(id)}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowRight') {
+                  e.preventDefault()
+                  moveTab(id, 1, e.currentTarget)
+                } else if (e.key === 'ArrowLeft') {
+                  e.preventDefault()
+                  moveTab(id, -1, e.currentTarget)
+                }
+              }}
             >
               {y(id === 'get' ? 'tabGet' : id === 'mine' ? 'tabMine' : 'tabShare')}
             </button>
           ))}
         </div>
       </header>
-      {!api ? (
-        <p className="ysp-error" role="alert">
-          {skillsText(lang, 'failGeneric')}
-        </p>
-      ) : tab === 'get' ? (
-        <SkillHubGetTab api={api} lang={lang} locale={locale} />
-      ) : tab === 'mine' ? (
-        <SkillHubMineTab api={api} lang={lang} />
-      ) : (
-        <p className="set-field-desc ysp-soon" data-testid="ysp-share-soon">
-          {y('shareComingSoon')}
-        </p>
-      )}
+      <div
+        className="ysp-panel"
+        role="tabpanel"
+        id={`ysp-panel-${tab}`}
+        aria-labelledby={`ysp-tabbtn-${tab}`}
+      >
+        {!api ? (
+          <p className="ysp-error" role="alert">
+            {skillsText(lang, 'failGeneric')}
+          </p>
+        ) : tab === 'get' ? (
+          <SkillHubGetTab api={api} lang={lang} locale={locale} />
+        ) : tab === 'mine' ? (
+          <SkillHubMineTab api={api} lang={lang} />
+        ) : (
+          <p className="set-field-desc ysp-soon" data-testid="ysp-share-soon">
+            {y('shareComingSoon')}
+          </p>
+        )}
+      </div>
     </main>
   )
 }

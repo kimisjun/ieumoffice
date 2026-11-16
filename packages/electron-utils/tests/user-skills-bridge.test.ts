@@ -110,7 +110,13 @@ describe('user skills channels', () => {
         selected: ['a', 4, 'b'],
         onCollision: { a: 'replace', b: 'merge' },
       }),
-    ).toEqual({ token: 't', selected: ['a', 'b'], onCollision: { a: 'replace' } })
+    ).toEqual({ token: 't', selected: ['a', 'b'], onCollision: { a: 'replace' }, keep: false })
+    expect(installRequestOf({ token: 't', selected: [], keep: true })).toEqual({
+      token: 't',
+      selected: [],
+      onCollision: {},
+      keep: true,
+    })
     expect(installRequestOf({ selected: [] })).toBeUndefined()
   })
 
@@ -159,6 +165,14 @@ describe('userSkillsBridge', () => {
       token: 'tok',
       selected: ['a'],
       onCollision: { a: 'skip' },
+      keep: false,
+    })
+    await userSkillsBridge().install('tok', ['b'], {}, true)
+    expect(electronMocks.invoke).toHaveBeenLastCalledWith(USER_SKILLS_CHANNELS.install, {
+      token: 'tok',
+      selected: ['b'],
+      onCollision: {},
+      keep: true,
     })
   })
 

@@ -15,6 +15,7 @@ export const ar = {
   finding: 'جارٍ الجلب من GitHub…',
   previewAction: 'معاينة',
   installAction: 'تثبيت',
+  installedAction: 'تم التثبيت',
   labelName: 'الاسم',
   labelDescription: 'الوصف',
   labelVersion: 'الإصدار',

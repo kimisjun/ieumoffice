@@ -15,6 +15,7 @@ export const vi = {
   finding: 'Đang lấy từ GitHub…',
   previewAction: 'Xem trước',
   installAction: 'Cài đặt',
+  installedAction: 'Đã cài đặt',
   labelName: 'Tên',
   labelDescription: 'Mô tả',
   labelVersion: 'Phiên bản',

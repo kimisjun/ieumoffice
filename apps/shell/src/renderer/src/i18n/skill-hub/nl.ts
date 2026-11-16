@@ -16,6 +16,7 @@ export const nl = {
   finding: 'Ophalen van GitHub…',
   previewAction: 'Voorbeeld',
   installAction: 'Installeren',
+  installedAction: 'Geïnstalleerd',
   labelName: 'Naam',
   labelDescription: 'Beschrijving',
   labelVersion: 'Versie',

@@ -389,6 +389,13 @@ export interface UserSkillInstallRequest {
   selected: string[]
   /** for checked candidates whose name is taken */
   onCollision: Record<string, UserSkillCollisionChoice>
+  /**
+   * Keep the previewed import alive after installing, so more of its
+   * candidates can be installed from the same preview (the skill hub installs
+   * one card at a time). The preview is cancelled as before when the screen
+   * is done with it.
+   */
+  keep?: boolean | undefined
 }
 
 export type UserSkillUpdateCheck =
@@ -624,7 +631,7 @@ export function installRequestOf(value: unknown): UserSkillInstallRequest | unde
       if (choice === 'replace' || choice === 'skip') onCollision[key] = choice
     }
   }
-  return { token, selected, onCollision }
+  return { token, selected, onCollision, keep: value.keep === true }
 }
 
 /** A list answer as the screen reads it: an array of skill views, else none */

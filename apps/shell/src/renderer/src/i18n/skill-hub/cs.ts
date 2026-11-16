@@ -15,6 +15,7 @@ export const cs = {
   finding: 'Stahuje se z GitHubu…',
   previewAction: 'Náhled',
   installAction: 'Nainstalovat',
+  installedAction: 'Nainstalováno',
   labelName: 'Název',
   labelDescription: 'Popis',
   labelVersion: 'Verze',

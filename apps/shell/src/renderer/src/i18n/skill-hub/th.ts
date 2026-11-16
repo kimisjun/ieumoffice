@@ -15,6 +15,7 @@ export const th = {
   finding: 'กำลังดึงจาก GitHub…',
   previewAction: 'ดูตัวอย่าง',
   installAction: 'ติดตั้ง',
+  installedAction: 'ติดตั้งแล้ว',
   labelName: 'ชื่อ',
   labelDescription: 'คำอธิบาย',
   labelVersion: 'เวอร์ชัน',

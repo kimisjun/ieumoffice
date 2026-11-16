@@ -16,6 +16,7 @@ export const pt = {
   finding: 'A obter do GitHub…',
   previewAction: 'Pré-visualização',
   installAction: 'Instalar',
+  installedAction: 'Instalado',
   labelName: 'Nome',
   labelDescription: 'Descrição',
   labelVersion: 'Versão',

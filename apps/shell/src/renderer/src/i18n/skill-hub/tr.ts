@@ -15,6 +15,7 @@ export const tr = {
   finding: 'GitHub’dan getiriliyor…',
   previewAction: 'Önizleme',
   installAction: 'Yükle',
+  installedAction: 'Yüklendi',
   labelName: 'Ad',
   labelDescription: 'Açıklama',
   labelVersion: 'Sürüm',

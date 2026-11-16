@@ -16,6 +16,7 @@ export const pl = {
   finding: 'Pobieranie z GitHuba…',
   previewAction: 'Podgląd',
   installAction: 'Zainstaluj',
+  installedAction: 'Zainstalowano',
   labelName: 'Nazwa',
   labelDescription: 'Opis',
   labelVersion: 'Wersja',

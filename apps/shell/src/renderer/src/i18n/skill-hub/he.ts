@@ -15,6 +15,7 @@ export const he = {
   finding: 'מתקבל מ־GitHub…',
   previewAction: 'תצוגה מקדימה',
   installAction: 'התקנה',
+  installedAction: 'מותקן',
   labelName: 'שם',
   labelDescription: 'תיאור',
   labelVersion: 'גרסה',

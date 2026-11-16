@@ -15,6 +15,7 @@ export const ja = {
   finding: 'GitHub から取得しています…',
   previewAction: 'プレビュー',
   installAction: 'インストール',
+  installedAction: 'インストール済み',
   labelName: '名前',
   labelDescription: '説明',
   labelVersion: 'バージョン',

@@ -83,6 +83,8 @@ export interface UserSkillsBridge {
     token: string,
     selected: string[],
     onCollision?: Record<string, UserSkillCollisionChoice>,
+    /** keep the previewed import alive for more installs from the same preview */
+    keep?: boolean,
   ): Promise<UserSkillsResult<{ installed: Array<{ key: string; id: string }>; skipped: string[] }>>
   checkUpdate(id: string): Promise<UserSkillUpdateCheck>
   applyUpdate(token: string): Promise<UserSkillsResult<{ id: string }>>
@@ -197,8 +199,8 @@ export function userSkillsBridge(): UserSkillsBridge {
     cancelImport: async (token) => {
       await ipcRenderer.invoke(C.cancelImport, token).catch(() => undefined)
     },
-    install: (token, selected, onCollision) =>
-      result(C.install, { token, selected, onCollision: onCollision ?? {} }),
+    install: (token, selected, onCollision, keep) =>
+      result(C.install, { token, selected, onCollision: onCollision ?? {}, keep: keep === true }),
     checkUpdate: async (id) => {
       try {
         const answer: unknown = await ipcRenderer.invoke(C.checkUpdate, String(id))

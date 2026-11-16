@@ -162,6 +162,7 @@ export interface SkillHubRowView {
 export function skillHubInstalledRow(view: UserSkillView): SkillHubRowView {
   const meta = view as WithMeta<UserSkillView>
   const provenance = provenanceOf(meta.provenance)
+  const version = shortText(meta.version)
   return {
     id: view.id,
     name: view.name,
@@ -171,6 +172,6 @@ export function skillHubInstalledRow(view: UserSkillView): SkillHubRowView {
     canRemove: view.can.remove,
     ...(provenance ? { provenanceSource: provenance.source } : {}),
     ...(provenance?.sourceUrl ? { provenanceUrl: provenance.sourceUrl } : {}),
-    ...(shortText(meta.version) ? { version: shortText(meta.version) } : {}),
+    ...(version ? { version } : {}),
   }
 }

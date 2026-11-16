@@ -138,9 +138,10 @@
   overflow: hidden;
 }
 
-.ysp-badges {
+.ysp-card-footer {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
 }
 
@@ -156,6 +157,7 @@
 .ysp-card-actions {
   display: flex;
   gap: 8px;
+  margin-left: auto;
 }
 
 .ysp-card-actions .set-btn,

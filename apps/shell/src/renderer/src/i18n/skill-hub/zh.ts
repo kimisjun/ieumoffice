@@ -13,6 +13,7 @@ export const zh = {
   finding: '正在从 GitHub 获取…',
   previewAction: '预览',
   installAction: '安装',
+  installedAction: '已安装',
   labelName: '名称',
   labelDescription: '说明',
   labelVersion: '版本',

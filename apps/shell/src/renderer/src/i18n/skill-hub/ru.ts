@@ -15,6 +15,7 @@ export const ru = {
   finding: 'Загрузка с GitHub…',
   previewAction: 'Предпросмотр',
   installAction: 'Установить',
+  installedAction: 'Установлено',
   labelName: 'Имя',
   labelDescription: 'Описание',
   labelVersion: 'Версия',

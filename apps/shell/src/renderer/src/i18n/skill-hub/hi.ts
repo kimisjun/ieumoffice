@@ -15,6 +15,7 @@ export const hi = {
   finding: 'GitHub से लाया जा रहा है…',
   previewAction: 'पूर्वावलोकन',
   installAction: 'इंस्टॉल करें',
+  installedAction: 'इंस्टॉल हो गया',
   labelName: 'नाम',
   labelDescription: 'विवरण',
   labelVersion: 'संस्करण',
