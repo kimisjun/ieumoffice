@@ -21,6 +21,7 @@ import {
   type SkillInstallState,
   type SkillLedger,
 } from '../agent-skills'
+import { appliedSkills, exportSkillFolder, findAppliedSkill } from '../applied-skills'
 import { flagBool, flagString } from '../args'
 import { genofficeUserDataDir } from '../gui'
 import type { CommandContext, CommandDef } from '../registry'
@@ -28,7 +29,7 @@ import { bundledSkillPath } from '../resources'
 import { CliError, EXIT, type Warning } from '../result'
 import { didYouMean } from '../suggest'
 
-const SUBCOMMANDS = ['list', 'install', 'remove', 'path']
+const SUBCOMMANDS = ['list', 'install', 'remove', 'export', 'path']
 
 /**
  * The headless twin of Settings → Integrations: list the coding agents on this
@@ -40,13 +41,16 @@ const SUBCOMMANDS = ['list', 'install', 'remove', 'path']
  * so naming one of them installs into that shared row. A copy this app wrote
  * into one of their own folders earlier is listed, kept at the bundled version
  * along with the install, and only `skill remove <tool>` deletes it (decision 0095).
+ *
+ * `skill export` is the publish side (issue #558): an applied skill written as
+ * a standard skill folder, ready to share.
  */
 export const skillCommand: CommandDef = {
   name: 'skill',
   summary:
-    'List the coding agents found on this machine and install, update or remove the bundled ieumoffice skill for them.',
+    'List the coding agents found on this machine and install, update or remove the bundled ieumoffice skill for them; export an applied skill as a standard skill folder.',
   usage:
-    'skill list | skill install <agent|all> [--dir <path>] [--force] | skill remove <agent> [--dir <path>] | skill path',
+    'skill list | skill install <agent|all> [--dir <path>] [--force] | skill remove <agent> [--dir <path>] | skill export <skill> --out <dir> | skill path',
   options: [
     { name: 'list', description: 'same as `skill list`' },
     {
@@ -58,6 +62,12 @@ export const skillCommand: CommandDef = {
       name: 'force',
       description:
         'install: also write when the agent is not detected, the installed copy is newer, or it was edited by hand',
+    },
+    {
+      name: 'out',
+      value: 'dir',
+      description:
+        'export: the folder to write the skill folder into (SKILL.md and its supporting files); it must be new or empty',
     },
   ],
   async run(args, ctx) {
@@ -73,6 +83,8 @@ export const skillCommand: CommandDef = {
         return install(args.positionals[1], flagString(args, 'dir'), flagBool(args, 'force'), ctx)
       case 'remove':
         return remove(args.positionals[1], flagString(args, 'dir'), ctx)
+      case 'export':
+        return exportSkill(args.positionals[1], flagString(args, 'out'), ctx)
       default:
         throw new CliError(
           EXIT.usage,
@@ -82,7 +94,7 @@ export const skillCommand: CommandDef = {
             reason: 'invalid_argument',
             suggestion: didYouMean(sub, SUBCOMMANDS)
               ? `did you mean \`${didYouMean(sub, SUBCOMMANDS)}\`?`
-              : 'use `skill list`, `skill install <agent|all>`, `skill remove <agent>` or `skill path`',
+              : 'use `skill list`, `skill install <agent|all>`, `skill remove <agent>`, `skill export <skill> --out <dir>` or `skill path`',
           },
         )
     }
@@ -343,6 +355,58 @@ function remove(name: string | undefined, dir: string | undefined, ctx: CommandC
           action: removed ? 'removed' : 'unchanged',
         },
       ],
+    },
+  }
+}
+
+/**
+ * Publish (issue #558): write an applied skill as a standard skill folder
+ * (SKILL.md with its YAML front matter and its supporting files) ready to
+ * share, e.g. on GitHub. Only the applied set is exported, the same skills the
+ * ieumoffice://skills resources expose.
+ */
+async function exportSkill(name: string | undefined, out: string | undefined, ctx: CommandContext) {
+  if (!name) {
+    throw new CliError(EXIT.usage, 'skill export needs a skill name', undefined, {
+      reason: 'missing_argument',
+      suggestion: 'run `skill export <skill> --out <dir>`',
+    })
+  }
+  if (!out) {
+    throw new CliError(EXIT.usage, 'skill export needs --out <dir>', undefined, {
+      reason: 'missing_argument',
+      suggestion: 'run `skill export <skill> --out <dir>`',
+    })
+  }
+  const skills = await appliedSkills(ctx.env)
+  const skill = findAppliedSkill(skills, name)
+  if (!skill) {
+    const names = skills.map((s) => s.name)
+    const guess = didYouMean(name, names)
+    throw new CliError(
+      EXIT.usage,
+      `no applied skill named ${name}`,
+      { supported: names },
+      {
+        reason: 'invalid_argument',
+        suggestion: guess
+          ? `did you mean \`${guess}\`?`
+          : names.length
+            ? `applied skills: ${names.join(', ')}`
+            : 'no skill is applied in IeumOffice; turn one on in the app first',
+      },
+    )
+  }
+  const target = resolve(ctx.cwd, out)
+  const written = await exportSkillFolder(skill, target)
+  return {
+    summary: `exported skill ${skill.name} to ${target} (${written.files} file(s))`,
+    detail: {
+      name: skill.name,
+      title: skill.title,
+      path: written.path,
+      files: written.files,
+      bytes: written.bytes,
     },
   }
 }
