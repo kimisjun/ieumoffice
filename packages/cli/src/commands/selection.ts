@@ -27,6 +27,14 @@ export const selectionCommand: CommandDef = {
 /** One line for the agent: what the user has selected, with a long text cut to a short preview. */
 export function summarize(result: Record<string, unknown>): string {
   if (result.none) return 'nothing is selected'
+  if (Array.isArray(result.topics)) {
+    const topics = result.topics as Array<{ id: string; title: string }>
+    if (topics.length === 0) return 'nothing is selected'
+    const first = topics[0]!
+    return topics.length === 1
+      ? `topic ${first.id}: ${preview(first.title)}`
+      : `topics: ${topics.map((topic) => topic.id).join(', ')}`
+  }
   if (Array.isArray(result.elements)) {
     return result.elements.length
       ? `slide ${result.slide}: ${result.elements.join(', ')}`
