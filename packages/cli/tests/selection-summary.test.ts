@@ -4,24 +4,54 @@ import { summarize } from '../src/commands/selection'
 describe('selection summary', () => {
   it('summarizes a selected mind map topic without changing its id', () => {
     expect(
-      summarize({ topics: [{ id: 'topic-a', title: 'Alpha', path: ['Plan', 'Alpha'] }] }),
-    ).toBe('topic topic-a: Alpha')
+      summarize({
+        sheet: 'First',
+        topics: [{ id: 'topic-a', title: 'Alpha', path: ['Plan', 'Alpha'] }],
+      }),
+    ).toBe('sheet First, topic topic-a: Alpha')
   })
 
   it('summarizes multiple selected mind map topics', () => {
     expect(
       summarize({
+        sheet: 'Second',
         topics: [
           { id: 'a', title: 'Alpha', path: ['Plan', 'Alpha'] },
           { id: 'b', title: 'Beta', path: ['Plan', 'Beta'] },
         ],
       }),
-    ).toBe('topics: a, b')
+    ).toBe('sheet Second, topics: a: Alpha, b: Beta')
+  })
+
+  it('limits a multiple-topic summary to three title previews and the remaining count', () => {
+    const topics = Array.from({ length: 5 }, (_, index) => ({
+      id: `id-${index}`,
+      title: `  ${'a'.repeat(100)}\nnext  `,
+    }))
+    const title = `${'a'.repeat(79)}…`
+    expect(summarize({ sheet: 'First', topics })).toBe(
+      `sheet First, topics: id-0: ${title}, id-1: ${title}, id-2: ${title}, +2 more`,
+    )
+  })
+
+  it('omits the title separator for empty or whitespace-only topic titles', () => {
+    expect(summarize({ sheet: 'First', topics: [{ id: 'a', title: '' }] })).toBe(
+      'sheet First, topic a',
+    )
+    expect(
+      summarize({
+        sheet: 'First',
+        topics: [
+          { id: 'a', title: ' \n ' },
+          { id: 'b', title: 'Beta' },
+        ],
+      }),
+    ).toBe('sheet First, topics: a, b: Beta')
   })
 
   it('reports an empty selection', () => {
-    expect(summarize({ none: true })).toBe('nothing is selected')
-    expect(summarize({ topics: [] })).toBe('nothing is selected')
+    expect(summarize({ none: true, sheet: 'First' })).toBe('nothing is selected')
+    expect(summarize({ sheet: 'First', topics: [] })).toBe('nothing is selected')
   })
 
   it('flattens and clips a mind map title without splitting an emoji', () => {

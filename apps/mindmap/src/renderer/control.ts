@@ -43,5 +43,6 @@ export function handleMindmapControl(
     for (let up: NodeObj | undefined = node; up; up = up.parent) path.push(up.topic)
     return [{ id: node.id, title: node.topic, path: path.reverse() }]
   })
-  return { status: 'ok', result: topics.length ? { topics } : { none: true } }
+  const sheet = map.sheetTitle
+  return { status: 'ok', result: topics.length ? { sheet, topics } : { none: true, sheet } }
 }

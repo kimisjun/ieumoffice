@@ -209,7 +209,7 @@ describe('CLI selection of the open map', () => {
   it('reports nothing selected without saving or changing the document', async () => {
     const { fake } = await openWith(richSheet())
     const dirty = [...fake.dirty]
-    expect(await readSelection()).toEqual({ status: 'ok', result: { none: true } })
+    expect(await readSelection()).toEqual({ status: 'ok', result: { none: true, sheet: 'First' } })
     expect(fake.saves).toEqual([])
     expect(fake.dirty).toEqual(dirty)
   })
@@ -219,12 +219,13 @@ describe('CLI selection of the open map', () => {
     await selectOnMap(IDS.root)
     expect(await readSelection()).toEqual({
       status: 'ok',
-      result: { topics: [{ id: IDS.root, title: 'Plan', path: ['Plan'] }] },
+      result: { sheet: 'First', topics: [{ id: IDS.root, title: 'Plan', path: ['Plan'] }] },
     })
     await selectOnMap(IDS.a1)
     expect(await readSelection()).toEqual({
       status: 'ok',
       result: {
+        sheet: 'First',
         topics: [{ id: IDS.a1, title: 'Alpha one', path: ['Plan', 'Alpha', 'Alpha one'] }],
       },
     })
@@ -252,6 +253,7 @@ describe('CLI selection of the open map', () => {
     expect(await readSelection()).toEqual({
       status: 'ok',
       result: {
+        sheet: 'First',
         topics: [
           { id: IDS.a, title: 'Alpha', path: ['Plan', 'Alpha'] },
           { id: IDS.c, title: 'Gamma', path: ['Plan', 'Gamma'] },
@@ -267,8 +269,12 @@ describe('CLI selection of the open map', () => {
     second.rootTopic.title = 'Other plan'
     await openWith(richSheet(), second)
     await selectOnMap(IDS.a)
+    expect(await readSelection()).toEqual({
+      status: 'ok',
+      result: { sheet: 'First', topics: [{ id: IDS.a, title: 'Alpha', path: ['Plan', 'Alpha'] }] },
+    })
     await click('.mm-sheet:not(.on) .mm-sheet-name')
-    expect(await readSelection()).toEqual({ status: 'ok', result: { none: true } })
+    expect(await readSelection()).toEqual({ status: 'ok', result: { none: true, sheet: 'Second' } })
     const visible = container.querySelector<HTMLElement>('.mm-sheet-host:not([hidden])')!
     await act(async () => {
       visible
@@ -279,7 +285,10 @@ describe('CLI selection of the open map', () => {
     })
     expect(await readSelection()).toEqual({
       status: 'ok',
-      result: { topics: [{ id: IDS.a, title: 'Alpha', path: ['Other plan', 'Alpha'] }] },
+      result: {
+        sheet: 'Second',
+        topics: [{ id: IDS.a, title: 'Alpha', path: ['Other plan', 'Alpha'] }],
+      },
     })
   })
 
@@ -288,9 +297,48 @@ describe('CLI selection of the open map', () => {
     await typeTitle(IDS.a, 'Updated title')
     expect(await readSelection()).toEqual({
       status: 'ok',
-      result: { topics: [{ id: IDS.a, title: 'Updated title', path: ['Plan', 'Updated title'] }] },
+      result: {
+        sheet: 'First',
+        topics: [{ id: IDS.a, title: 'Updated title', path: ['Plan', 'Updated title'] }],
+      },
     })
     expect(fake.saves).toEqual([])
+  })
+
+  it('includes a title during IME composition and ends the composition on blur', async () => {
+    const { fake } = await openWith(richSheet())
+    await typeTitle(IDS.a, '')
+    const box = container.querySelector<HTMLElement>('#input-box')!
+    const events: string[] = []
+    const map = container.querySelector<HTMLElement>('.map-container')!
+    map.addEventListener('compositionstart', () => events.push('start'))
+    map.addEventListener('compositionend', () => events.push('end'))
+    // Simulate the browser ending composition before the library removes the blurred box.
+    box.addEventListener(
+      'blur',
+      () =>
+        box.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '한글' })),
+      { capture: true, once: true },
+    )
+    await act(async () => {
+      box.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+      box.textContent = '한글'
+      box.dispatchEvent(new InputEvent('input', { bubbles: true, isComposing: true, data: '한글' }))
+    })
+    expect(events).toEqual(['start'])
+    expect(await readSelection()).toEqual({
+      status: 'ok',
+      result: {
+        sheet: 'First',
+        topics: [{ id: IDS.a, title: '한글', path: ['Plan', '한글'] }],
+      },
+    })
+    expect(events).toEqual(['start', 'end'])
+    expect(container.querySelector('#input-box')).toBeNull()
+    expect(topicEl(IDS.a).textContent).toContain('한글')
+    expect(fake.saves).toEqual([])
+    await act(async () => fake.emit.menu('undo'))
+    expect(topicEl(IDS.a).textContent).toContain('Alpha')
   })
 
   it('answers loading and failed states and removes the hook on unmount', async () => {
