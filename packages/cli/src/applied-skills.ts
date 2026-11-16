@@ -181,7 +181,8 @@ export type SkillMdRead = { kind: 'ok'; text: string } | { kind: 'missing' } | {
 /**
  * The full SKILL.md text of one applied skill, front matter included. Read
  * through the link-safe reader (`readListedSkillMd`), so a link leading out of
- * the folder is never followed and the case-variant `skill.md` counts. A
+ * the folder is never followed and a case-variant `skill.md` counts on Windows
+ * only (name folding is win32-only; POSIX names match exactly). A
  * folder without a SKILL.md is `missing`; a folder (or its SKILL.md) that
  * cannot be read is `broken`, never silently missing.
  */

@@ -219,10 +219,10 @@ The skills the person applied (enabled) in the app follow along too (issue
 #558): `ieumoffice://skills` lists each applied skill's name and description
 only, `ieumoffice://skills/<name>` gives one skill's SKILL.md, so bodies are
 read one at a time (progressive disclosure). Skills that are switched off,
-hidden or pushed back by a same-named one are never exposed; `ieumoffice skill
-export <name> --out <dir>` writes an applied skill as a standard skill folder
-(SKILL.md and its supporting files, without the app's source record) ready to
-publish.
+hidden builtins, agent-window-only builtins or pushed back by a same-named one
+are never exposed; `ieumoffice skill export <name> --out <dir>` writes an
+applied skill as a standard skill folder (SKILL.md and its supporting files,
+without the app's source record) ready to publish.
 
 A new deck goes through `deck_start` (style sheet + outline, returns the
 design and spec guides), `deck_page` (one page per call, checked against its

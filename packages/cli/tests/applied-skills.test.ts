@@ -370,6 +370,29 @@ describe('ieumoffice://skills resources (follow-along)', () => {
     })
   })
 
+  it('an empty applied set says so and points at the app', async () => {
+    // every skill turned off: the list says so instead of going blank
+    const { env } = fixture({
+      skillSettings: {
+        states: {
+          'app:team-docs': { enabled: false },
+          'app:grade-review': { enabled: false },
+          'app:off-skill': { enabled: false },
+        },
+      },
+    })
+    await withClient(env, async (client) => {
+      const listed = textOf((await client.readResource({ uri: 'ieumoffice://skills' })).contents)
+      expect(listed).toContain('no skills applied in IeumOffice')
+    })
+    const out = join(tempDir(), 'publish')
+    const r = await run(['skill', 'export', 'team-docs', '--out', out, '--json'], { env })
+    expect(r.code).toBe(1)
+    expect(r.json().error).toBe('invalid_argument')
+    expect(r.json().suggestion).toContain('turn one on in the app first')
+    expect(existsSync(out)).toBe(false)
+  })
+
   it('reports an unreadable skill folder as broken, not as missing', async () => {
     const { env, home } = fixture()
     const team = join(home, '.ieumoffice', 'skills', 'team-docs')
