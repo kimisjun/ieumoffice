@@ -50,7 +50,7 @@ export const skillCommand: CommandDef = {
   summary:
     'List the coding agents found on this machine and install, update or remove the bundled ieumoffice skill for them; export an applied skill as a standard skill folder.',
   usage:
-    'skill list | skill install <agent|all> [--dir <path>] [--force] | skill remove <agent> [--dir <path>] | skill export <skill> --out <dir> | skill path',
+    'skill list | skill install <agent|all> [--dir <path>] [--force] | skill remove <agent> [--dir <path>] | skill export <skill> --out <dir> [--include-template] | skill path',
   options: [
     { name: 'list', description: 'same as `skill list`' },
     {
@@ -69,6 +69,11 @@ export const skillCommand: CommandDef = {
       description:
         'export: the folder to write the skill folder into (SKILL.md and its supporting files); it must be new or empty',
     },
+    {
+      name: 'include-template',
+      description:
+        "export: also copy the skill's template document (the `assets/` copy of a real document); left out by default",
+    },
   ],
   async run(args, ctx) {
     const sub = flagBool(args, 'list') ? 'list' : (args.positionals[0] ?? 'list')
@@ -84,7 +89,12 @@ export const skillCommand: CommandDef = {
       case 'remove':
         return remove(args.positionals[1], flagString(args, 'dir'), ctx)
       case 'export':
-        return exportSkill(args.positionals[1], flagString(args, 'out'), ctx)
+        return exportSkill(
+          args.positionals[1],
+          flagString(args, 'out'),
+          flagBool(args, 'include-template'),
+          ctx,
+        )
       default:
         throw new CliError(
           EXIT.usage,
@@ -363,9 +373,16 @@ function remove(name: string | undefined, dir: string | undefined, ctx: CommandC
  * Publish (issue #558): write an applied skill as a standard skill folder
  * (SKILL.md with its YAML front matter and its supporting files) ready to
  * share, e.g. on GitHub. Only the applied set is exported, the same skills the
- * ieumoffice://skills resources expose.
+ * ieumoffice://skills resources expose. The template document (the `assets/`
+ * copy of a real document) is left out unless --include-template is given,
+ * and either way the result says so and warns.
  */
-async function exportSkill(name: string | undefined, out: string | undefined, ctx: CommandContext) {
+async function exportSkill(
+  name: string | undefined,
+  out: string | undefined,
+  includeTemplate: boolean,
+  ctx: CommandContext,
+) {
   if (!name) {
     throw new CliError(EXIT.usage, 'skill export needs a skill name', undefined, {
       reason: 'missing_argument',
@@ -398,15 +415,33 @@ async function exportSkill(name: string | undefined, out: string | undefined, ct
     )
   }
   const target = resolve(ctx.cwd, out)
-  const written = await exportSkillFolder(skill, target)
+  const written = await exportSkillFolder(skill, target, { includeTemplate })
+  // the template document is a copy of a real document: never silent either way
+  const warnings: Warning[] = []
+  if (written.includesTemplate) {
+    warnings.push({
+      code: 'template_included',
+      message: `the template document ${skill.template} is in the exported folder; it is a copy of a real document and may hold real names and values`,
+      suggestion:
+        'clear it with the app (Make a blank template) before sharing, or export without --include-template',
+    })
+  } else if (written.templateLeftOut) {
+    warnings.push({
+      code: 'template_left_out',
+      message: `the template document ${skill.template} was left out of the exported folder`,
+      suggestion: 'repeat with --include-template to copy it too',
+    })
+  }
   return {
     summary: `exported skill ${skill.name} to ${target} (${written.files} file(s))`,
+    ...(warnings.length ? { warnings } : {}),
     detail: {
       name: skill.name,
       title: skill.title,
       path: written.path,
       files: written.files,
       bytes: written.bytes,
+      template_included: written.includesTemplate,
     },
   }
 }

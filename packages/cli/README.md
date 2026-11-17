@@ -100,7 +100,7 @@ ieumoffice skill list   # coding agents found on this machine and the skill vers
 ieumoffice skill install codex   # Codex, Cursor, Gemini CLI, Copilot and OpenCode share ~/.agents/skills (`skill install agents`)
 ieumoffice skill install --dir ./skills --force   # copy the bundled skill into a skills directory
 ieumoffice skill remove codex   # remove a copy this app wrote (here: the older one in ~/.codex/skills)
-ieumoffice skill export team-docs --out ./publish/team-docs   # an applied skill as a standard skill folder (SKILL.md + supporting files) ready for GitHub; --out must be new or empty
+ieumoffice skill export team-docs --out ./publish/team-docs   # an applied skill as a standard skill folder (SKILL.md + supporting files) ready for GitHub; --out must be new or empty; the skill's template document is left out unless --include-template is given
 ieumoffice install-cli   # put ieumoffice on the PATH
 ieumoffice mcp --http 3000 [--host 127.0.0.1] [--token secret]   # Streamable HTTP for clients on other machines; omit --http for stdio
 ieumoffice mcp --compact-schemas   # advertise ops/cells/data as plain arrays instead of the per-op schema (smaller tools/list; also GENOFFICE_MCP_COMPACT_SCHEMAS=1)
@@ -222,7 +222,9 @@ read one at a time (progressive disclosure). Skills that are switched off,
 hidden builtins, agent-window-only builtins or pushed back by a same-named one
 are never exposed; `ieumoffice skill export <name> --out <dir>` writes an
 applied skill as a standard skill folder (SKILL.md and its supporting files,
-without the app's source record) ready to publish.
+without the app's source record) ready to publish — its template document (the
+`assets/` copy of a real document) is left out unless `--include-template` is
+given.
 
 A new deck goes through `deck_start` (style sheet + outline, returns the
 design and spec guides), `deck_page` (one page per call, checked against its

@@ -13,7 +13,7 @@
  * own profile, so a skill turned off in a running dev app never leaks here.
  */
 import { constants as fsConstants, existsSync, readFileSync } from 'node:fs'
-import { copyFile, mkdir, readdir, rmdir, unlink } from 'node:fs/promises'
+import { copyFile, mkdir, open, readdir, rmdir, unlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -47,11 +47,17 @@ export interface AppliedSkill {
   description: string
   /** the skill folder holding SKILL.md and its supporting files */
   dir: string
+  /** `metadata.ieum-template` when it names a file under `assets/`: the template document copy */
+  template: string | undefined
 }
 
-/** test seams: the home the skill folders live under and the app settings directory */
+/**
+ * The home the skill folders live under: the app's own `homedir()` (never
+ * `env.HOME`, which can point elsewhere on Windows), with GENOFFICE_HOME as
+ * the test seam.
+ */
 function homeOf(env: NodeJS.ProcessEnv): string {
-  return env.GENOFFICE_HOME || env.HOME || homedir()
+  return env.GENOFFICE_HOME || homedir()
 }
 
 function settingsPath(dir: string): string {
@@ -151,6 +157,7 @@ export async function appliedSkills(env: NodeJS.ProcessEnv): Promise<AppliedSkil
       title: skill.title,
       description: skill.description,
       dir: skill.dir,
+      template: skill.template,
     }))
 }
 
@@ -206,19 +213,38 @@ export interface SkillExportResult {
   path: string
   files: number
   bytes: number
+  /** the template document went into the folder (--include-template) */
+  includesTemplate: boolean
+  /** the skill has a template document and it was left out of the folder */
+  templateLeftOut: boolean
+}
+
+/** A file that can be opened for reading; a copy failure blames the source only when it cannot */
+async function sourceReadable(path: string): Promise<boolean> {
+  try {
+    const handle = await open(path, 'r')
+    await handle.close()
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**
  * Write an applied skill as a standard skill folder (SKILL.md with its YAML
  * front matter plus its supporting files) ready to publish, e.g. to GitHub.
  * The out folder is the skill folder itself and must be new or empty; the
- * app's GitHub source record stays behind. A failure leaves the out folder as
+ * app's GitHub source record stays behind. The template document (the `assets/`
+ * copy of a real document, `metadata.ieum-template`) is left out unless
+ * `includeTemplate` is set — a template built from a real-named document must
+ * not reach a shareable folder by default. A failure leaves the out folder as
  * it was found, and a folder without a SKILL.md is an error, never an empty
  * "standard skill folder". Returns what was written.
  */
 export async function exportSkillFolder(
   skill: AppliedSkill,
   outDir: string,
+  options: { includeTemplate?: boolean } = {},
 ): Promise<SkillExportResult> {
   let there: string[] | undefined
   try {
@@ -281,20 +307,38 @@ export async function exportSkillFolder(
   let files = 0
   let bytes = 0
   let skillMdCopied = false
+  let templateLeftOut = false
+  let includesTemplate = false
+  /** the file being copied when a failure came in, so the error names the right side */
+  let copying: { rel: string; path: string } | undefined
   try {
     for (const file of listed.files) {
       // the GitHub source record is this app's bookkeeping, not part of the standard folder
       if (file.rel === IEUM_SOURCE_FILE) continue
+      // the template document is a copy of a real document (assets/): left out unless asked for
+      if (
+        skill.template !== undefined &&
+        fold(file.rel) === fold(skill.template) &&
+        !options.includeTemplate
+      ) {
+        templateLeftOut = true
+        continue
+      }
       const parts = file.rel.split('/')
       const target = join(outDir, ...parts)
       for (let i = 1; i < parts.length; i += 1) madeDirs.add(join(outDir, ...parts.slice(0, i)))
       await mkdir(dirname(target), { recursive: true })
+      copying = file
       // exclusive: a file another process put there is never overwritten
       await copyFile(file.path, target, fsConstants.COPYFILE_EXCL)
+      copying = undefined
       written.push(target)
       files += 1
       bytes += file.size
       if (fold(file.rel) === fold('SKILL.md')) skillMdCopied = true
+      if (skill.template !== undefined && fold(file.rel) === fold(skill.template)) {
+        includesTemplate = true
+      }
     }
   } catch (err) {
     await cleanUp()
@@ -304,6 +348,16 @@ export async function exportSkillFolder(
         `a file appeared in the output folder while exporting: ${outDir}`,
         { skill: skill.name, path: outDir },
         { reason: 'output_exists', suggestion: 'choose a new or empty folder' },
+      )
+    }
+    // copyFile cannot say which side failed: a source that cannot be read is an
+    // unreadable skill file, not an unusable --out
+    if (copying && !(await sourceReadable(copying.path))) {
+      throw new CliError(
+        EXIT.file,
+        `cannot read the skill file: ${copying.path}`,
+        { skill: skill.name, path: copying.path },
+        { reason: 'file_not_found', suggestion: 'check the skill folder is readable' },
       )
     }
     throw new CliError(
@@ -326,5 +380,5 @@ export async function exportSkillFolder(
       { reason: 'file_not_found' },
     )
   }
-  return { path: outDir, files, bytes }
+  return { path: outDir, files, bytes, includesTemplate, templateLeftOut }
 }

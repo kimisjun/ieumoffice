@@ -50,6 +50,21 @@ const OFF_SKILL_MD = [
   '',
 ].join('\n')
 
+const TEMPLATE_SKILL_MD = [
+  '---',
+  'name: template-docs',
+  'description: Make a report from the saved template.',
+  'metadata:',
+  '  ieum-template: assets/report.docx',
+  '---',
+  '',
+  'Open the template and fill it in.',
+  '',
+].join('\n')
+
+/** the template document's bytes: the copy of a real document, a real name inside */
+const TEMPLATE_DOCUMENT = 'REPORT-TEMPLATE-HOLDING-A-REAL-NAME'
+
 /** The body markers a leaked skill would show up with */
 const SHADOWED_BETA_BODY = 'BETA-SHADOWED-BODY'
 const SHADOWED_BUILTIN_BODY = 'BUILTIN-SHADOWED-BODY'
@@ -141,6 +156,11 @@ function fixture(opts: FixtureOptions = {}): Fixture {
       GENOFFICE_USER_DATA: userData,
       GENOFFICE_BUILTIN_SKILLS: builtin,
       GENOFFICE_AUDIT_LOG: 'off',
+      // every home/settings location points into this fixture's temp folders,
+      // so no platform reads the real user settings (packages/cli/AGENTS.md)
+      HOME: home,
+      APPDATA: join(home, 'AppData', 'Roaming'),
+      XDG_CONFIG_HOME: join(home, '.config'),
     },
   }
 }
@@ -148,6 +168,15 @@ function fixture(opts: FixtureOptions = {}): Fixture {
 interface ProfilesFixture extends Fixture {
   installedDir: string
   devDir: string
+}
+
+/** A home whose applied skill carries a template document (the `assets/` copy of a real document) */
+function fixtureWithTemplate(): Fixture {
+  const f = fixture({ extraSkills: [{ folder: 'template-docs', md: TEMPLATE_SKILL_MD }] })
+  const assets = join(f.home, '.ieumoffice', 'skills', 'template-docs', 'assets')
+  mkdirSync(assets, { recursive: true })
+  writeFileSync(join(assets, 'report.docx'), TEMPLATE_DOCUMENT)
+  return f
 }
 
 /**
@@ -171,8 +200,16 @@ function profilesFixture(profiles: {
   const builtin = join(home, 'builtin-skills')
   mkdirSync(builtin, { recursive: true })
   writeFileSync(join(builtin, 'builtin-skills.json'), '[]')
-  const installedDir = genofficeUserDataDir({ HOME: root })
-  const devDir = genofficeDevUserDataDir({ HOME: root })
+  // every home/settings location points into the temp root on every platform,
+  // so the test never reads the real %APPDATA%\IeumOffice (or Library/.config)
+  // settings (packages/cli/AGENTS.md: the real home folder is never touched)
+  const isolated: NodeJS.ProcessEnv = {
+    HOME: root,
+    APPDATA: join(root, 'AppData', 'Roaming'),
+    XDG_CONFIG_HOME: join(root, '.config'),
+  }
+  const installedDir = genofficeUserDataDir(isolated)
+  const devDir = genofficeDevUserDataDir(isolated)
   for (const [dir, settings] of [
     [installedDir, profiles.installed],
     [devDir, profiles.dev],
@@ -195,9 +232,9 @@ function profilesFixture(profiles: {
     devDir,
     env: {
       ...process.env,
+      ...isolated,
       GENOFFICE_HOME: home,
       GENOFFICE_USER_DATA: undefined,
-      HOME: root,
       GENOFFICE_BUILTIN_SKILLS: builtin,
       GENOFFICE_AUDIT_LOG: 'off',
     },
@@ -393,35 +430,41 @@ describe('ieumoffice://skills resources (follow-along)', () => {
     expect(existsSync(out)).toBe(false)
   })
 
-  it('reports an unreadable skill folder as broken, not as missing', async () => {
-    const { env, home } = fixture()
-    const team = join(home, '.ieumoffice', 'skills', 'team-docs')
-    chmodSync(team, 0o000)
-    try {
+  // chmod 0o000 is a no-op on Windows, so the unreadable folder cannot be staged there
+  it.skipIf(process.platform === 'win32')(
+    'reports an unreadable skill folder as broken, not as missing',
+    async () => {
+      const { env, home } = fixture()
+      const team = join(home, '.ieumoffice', 'skills', 'team-docs')
+      chmodSync(team, 0o000)
+      try {
+        const md = await skillMdOf({
+          id: 'app:team-docs',
+          name: 'team-docs',
+          title: 'Team document',
+          description: 'x',
+          dir: team,
+          template: undefined,
+        })
+        expect(md).toMatchObject({ kind: 'broken' })
+      } finally {
+        chmodSync(team, 0o755)
+      }
+      // a folder without SKILL.md is genuinely missing, not broken
+      const bare = join(tempDir(), 'bare')
+      mkdirSync(bare)
+      writeFileSync(join(bare, 'notes.md'), '# Notes\n')
       const md = await skillMdOf({
-        id: 'app:team-docs',
-        name: 'team-docs',
-        title: 'Team document',
+        id: 'app:bare',
+        name: 'bare',
+        title: 'bare',
         description: 'x',
-        dir: team,
+        dir: bare,
+        template: undefined,
       })
-      expect(md).toMatchObject({ kind: 'broken' })
-    } finally {
-      chmodSync(team, 0o755)
-    }
-    // a folder without SKILL.md is genuinely missing, not broken
-    const bare = join(tempDir(), 'bare')
-    mkdirSync(bare)
-    writeFileSync(join(bare, 'notes.md'), '# Notes\n')
-    const md = await skillMdOf({
-      id: 'app:bare',
-      name: 'bare',
-      title: 'bare',
-      description: 'x',
-      dir: bare,
-    })
-    expect(md).toMatchObject({ kind: 'missing' })
-  })
+      expect(md).toMatchObject({ kind: 'missing' })
+    },
+  )
 })
 
 describe('skill on/off state across the app profiles', () => {
@@ -507,7 +550,8 @@ describe('skill export', () => {
     expect(noOut.json().error).toBe('missing_argument')
   })
 
-  it('refuses an --out path that cannot be used', async () => {
+  // chmod 0o000 is a no-op on Windows, so the unreadable --out parent cannot be staged there
+  it.skipIf(process.platform === 'win32')('refuses an --out path that cannot be used', async () => {
     const { env } = fixture()
     // a file where the skill folder should go (ENOTDIR)
     const file = join(tempDir(), 'occupied')
@@ -538,7 +582,14 @@ describe('skill export', () => {
     const out = join(tempDir(), 'publish')
     await expect(
       exportSkillFolder(
-        { id: 'app:vanish', name: 'vanish', title: 'Vanish', description: 'x', dir },
+        {
+          id: 'app:vanish',
+          name: 'vanish',
+          title: 'Vanish',
+          description: 'x',
+          dir,
+          template: undefined,
+        },
         out,
       ),
     ).rejects.toMatchObject({ reason: 'file_not_found' })
@@ -546,27 +597,42 @@ describe('skill export', () => {
     expect(existsSync(out)).toBe(false)
   })
 
-  it('leaves no half-copied folder behind when a copy fails midway', async () => {
-    const dir = join(tempDir(), 'failing')
-    mkdirSync(join(dir, 'references'), { recursive: true })
-    writeFileSync(join(dir, 'SKILL.md'), TEAM_SKILL_MD)
-    writeFileSync(join(dir, 'references', 'style.md'), '# Style\n')
-    // a supporting file the copy cannot read: the failure lands after SKILL.md
-    chmodSync(join(dir, 'references', 'style.md'), 0o000)
-    const out = join(tempDir(), 'publish')
-    try {
-      await expect(
-        exportSkillFolder(
-          { id: 'app:failing', name: 'failing', title: 'Failing', description: 'x', dir },
-          out,
-        ),
-      ).rejects.toMatchObject({ reason: 'invalid_argument' })
-    } finally {
-      chmodSync(join(dir, 'references', 'style.md'), 0o644)
-    }
-    expect(existsSync(join(out, 'SKILL.md'))).toBe(false)
-    expect(existsSync(out)).toBe(false)
-  })
+  // chmod 0o000 is a no-op on Windows, so the unreadable source cannot be staged there
+  it.skipIf(process.platform === 'win32')(
+    'leaves no half-copied folder behind when a copy fails midway',
+    async () => {
+      const dir = join(tempDir(), 'failing')
+      mkdirSync(join(dir, 'references'), { recursive: true })
+      writeFileSync(join(dir, 'SKILL.md'), TEAM_SKILL_MD)
+      writeFileSync(join(dir, 'references', 'style.md'), '# Style\n')
+      // a supporting file the copy cannot read: the failure lands after SKILL.md
+      chmodSync(join(dir, 'references', 'style.md'), 0o000)
+      const out = join(tempDir(), 'publish')
+      try {
+        await expect(
+          exportSkillFolder(
+            {
+              id: 'app:failing',
+              name: 'failing',
+              title: 'Failing',
+              description: 'x',
+              dir,
+              template: undefined,
+            },
+            out,
+          ),
+        ).rejects.toMatchObject({
+          reason: 'file_not_found',
+          // the source cannot be read: the error says so, never "cannot write into the output folder"
+          message: expect.stringContaining('cannot read the skill file'),
+        })
+      } finally {
+        chmodSync(join(dir, 'references', 'style.md'), 0o644)
+      }
+      expect(existsSync(join(out, 'SKILL.md'))).toBe(false)
+      expect(existsSync(out)).toBe(false)
+    },
+  )
 
   it('exports the picked skill of a shared name', async () => {
     const { env } = fixture({
@@ -588,5 +654,31 @@ describe('skill export', () => {
     const md = readFileSync(join(out, 'SKILL.md'), 'utf8')
     expect(md).toContain('ALPHA-WINNER-BODY')
     expect(md).not.toContain(SHADOWED_BETA_BODY)
+  })
+
+  it('leaves the template document out of the export by default and says so', async () => {
+    const { env } = fixtureWithTemplate()
+    const out = join(tempDir(), 'publish')
+    const r = await run(['skill', 'export', 'template-docs', '--out', out, '--json'], { env })
+    expect(r.code).toBe(0)
+    // a template document is a copy of a real document: never in a shareable
+    // folder unless the person asks for it
+    expect(existsSync(join(out, 'assets', 'report.docx'))).toBe(false)
+    expect(readFileSync(join(out, 'SKILL.md'), 'utf8')).toBe(TEMPLATE_SKILL_MD)
+    expect(r.json().detail).toMatchObject({ template_included: false })
+    expect(r.json().warnings).toContainEqual(expect.objectContaining({ code: 'template_left_out' }))
+  })
+
+  it('copies the template document with --include-template and warns', async () => {
+    const { env } = fixtureWithTemplate()
+    const out = join(tempDir(), 'publish')
+    const r = await run(
+      ['skill', 'export', 'template-docs', '--out', out, '--include-template', '--json'],
+      { env },
+    )
+    expect(r.code).toBe(0)
+    expect(readFileSync(join(out, 'assets', 'report.docx'), 'utf8')).toBe(TEMPLATE_DOCUMENT)
+    expect(r.json().detail).toMatchObject({ template_included: true })
+    expect(r.json().warnings).toContainEqual(expect.objectContaining({ code: 'template_included' }))
   })
 })

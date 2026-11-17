@@ -150,7 +150,8 @@ function registerSkillResources(server: McpServer, ctx: McpContext): void {
     new ResourceTemplate(`${SKILLS_URI}/{name}`, {
       list: async () => ({
         resources: (await appliedSkills(ctx.env)).map((skill) => ({
-          uri: `${SKILLS_URI}/${skill.name}`,
+          // encoded: a name is a path segment, and names may hold reserved URI characters
+          uri: `${SKILLS_URI}/${encodeURIComponent(skill.name)}`,
           name: skill.name,
           description: skill.description,
           mimeType: 'text/markdown',
@@ -182,8 +183,10 @@ function registerSkillResources(server: McpServer, ctx: McpContext): void {
       }
       const md = await skillMdOf(skill)
       if (md.kind === 'broken') {
-        // distinct from a missing SKILL.md: the folder exists but cannot be read
-        throw new McpError(ErrorCode.InternalError, `cannot read the skill folder: ${skill.dir}`)
+        // distinct from a missing SKILL.md: the folder exists but cannot be
+        // read. The name only, never the folder path: this message also goes
+        // out over --http
+        throw new McpError(ErrorCode.InternalError, `cannot read the skill folder of ${skill.name}`)
       }
       if (md.kind === 'missing') {
         throw new McpError(ErrorCode.InvalidParams, `skill ${skill.name} has no SKILL.md`)
